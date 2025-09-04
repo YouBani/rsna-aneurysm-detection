@@ -1,5 +1,8 @@
 from pathlib import Path
 import pandas as pd
+import argparse
+import json
+
 
 def build_manifest(data_root: str) -> list[dict]:
     """
@@ -7,7 +10,7 @@ def build_manifest(data_root: str) -> list[dict]:
 
     Args:
         data_root (str): The root directory of the dataset.
-    
+
     Returns:
         list[dict]: A list of dictionaries, one per SeriesInstanceUID.
     """
@@ -21,32 +24,60 @@ def build_manifest(data_root: str) -> list[dict]:
 
     manifest = []
     for _, row in df.iterrows():
-        series_uid = row['SeriesInstanceUID']
+        series_uid = row["SeriesInstanceUID"]
         image_path = raw_data / "series" / series_uid
         seg_path = raw_data / "segmentations" / f"{series_uid}.nii"
 
         entry = {
-        'id': series_uid,
-        'image_path': str(image_path),
-        'segmentation_path': str(seg_path) if seg_path.exists() else None,
-        'label': int(row['Aneurysm Present']),
-        'patient_age': int(row['PatientAge']),
-        'patient_sex': row['PatientSex'],
-
-        'left_infraclinoid_ica': int(row['Left Infraclinoid Internal Carotid Artery']),
-        'right_infraclinoid_ica': int(row['Right Infraclinoid Internal Carotid Artery']),
-        'left_supraclinoid_ica': int(row['Left Supraclinoid Internal Carotid Artery']),
-        'right_supraclinoid_ica': int(row['Right Supraclinoid Internal Carotid Artery']),
-        'left_middle_cerebral_artery': int(row['Left Middle Cerebral Artery']),
-        'right_middle_cerebral_artery': int(row['Right Middle Cerebral Artery']),
-        'anterior_communicating_artery': int(row['Anterior Communicating Artery']),
-        'left_anterior_cerebral_artery': int(row['Left Anterior Cerebral Artery']),
-        'right_anterior_cerebral_artery': int(row['Right Anterior Cerebral Artery']),
-        'left_posterior_communicating_artery': int(row['Left Posterior Communicating Artery']),
-        'right_posterior_communicating_artery': int(row['Right Posterior Communicating Artery']),
-        'basilar_tip': int(row['Basilar Tip']),
-        'other_posterior_circulation': int(row['Other Posterior Circulation'])
+            "id": series_uid,
+            "image_path": str(image_path),
+            "segmentation_path": str(seg_path) if seg_path.exists() else None,
+            "label": int(row["Aneurysm Present"]),
+            "patient_age": int(row["PatientAge"]),
+            "patient_sex": row["PatientSex"],
+            "left_infraclinoid_ica": int(
+                row["Left Infraclinoid Internal Carotid Artery"]
+            ),
+            "right_infraclinoid_ica": int(
+                row["Right Infraclinoid Internal Carotid Artery"]
+            ),
+            "left_supraclinoid_ica": int(
+                row["Left Supraclinoid Internal Carotid Artery"]
+            ),
+            "right_supraclinoid_ica": int(
+                row["Right Supraclinoid Internal Carotid Artery"]
+            ),
+            "left_middle_cerebral_artery": int(row["Left Middle Cerebral Artery"]),
+            "right_middle_cerebral_artery": int(row["Right Middle Cerebral Artery"]),
+            "anterior_communicating_artery": int(row["Anterior Communicating Artery"]),
+            "left_anterior_cerebral_artery": int(row["Left Anterior Cerebral Artery"]),
+            "right_anterior_cerebral_artery": int(
+                row["Right Anterior Cerebral Artery"]
+            ),
+            "left_posterior_communicating_artery": int(
+                row["Left Posterior Communicating Artery"]
+            ),
+            "right_posterior_communicating_artery": int(
+                row["Right Posterior Communicating Artery"]
+            ),
+            "basilar_tip": int(row["Basilar Tip"]),
+            "other_posterior_circulation": int(row["Other Posterior Circulation"]),
         }
         manifest.append(entry)
 
     return manifest
+
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--data-root", default=".")
+    p.add_argument("--out", default="processed/manifest.json")
+    args = p.parse_args()
+
+    m = build_manifest(args.data_root)
+    out = Path(args.data_root) / args.out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w") as f:
+        for row in m:
+            f.write(json.dumps(row) + "\n")
+    print(f"Wrote {len(m)} rows in {out}")
