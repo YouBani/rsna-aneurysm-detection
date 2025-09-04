@@ -71,7 +71,7 @@ def build_manifest(data_root: str) -> list[dict]:
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--data-root", default=".")
-    p.add_argument("--out", default="processed/manifest.json")
+    p.add_argument("--out", default="processed/manifest.jsonl")
     args = p.parse_args()
 
     m = build_manifest(args.data_root)
