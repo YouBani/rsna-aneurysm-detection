@@ -1,7 +1,11 @@
 from pathlib import Path
-import pandas as pd
 import argparse
 import json
+
+import pandas as pd
+from pydicom import dcmread
+
+from src.data.series_classifier import infer_subtype, get_upper_str
 
 
 def build_manifest(data_root: str) -> list[dict]:
@@ -28,8 +32,28 @@ def build_manifest(data_root: str) -> list[dict]:
         image_path = raw_data / "series" / series_uid
         seg_path = raw_data / "segmentations" / f"{series_uid}.nii"
 
+        modality = "UNKNOWN"
+        subtype = "UNKNOWN"
+        patient_id = ""
+        patient_weight = ""
+
+        dicom_files = sorted(list(image_path.glob("*.dcm")))
+        if dicom_files:
+            try:
+                ds = dcmread(str(dicom_files[0]), stop_before_pixels=True)
+                subtype = infer_subtype(ds)
+                modality = get_upper_str(ds, "Modality")
+                patient_id = get_upper_str(ds, "PatientID")
+                patient_weight = str(getattr(ds, "PatientWeight", ""))
+            except Exception as e:
+                print(f"[WARN]: Failed to read header for SeriesUID {series_uid}: {e}")
+
         entry = {
             "id": series_uid,
+            "patient_id": patient_id,
+            "patient_weight": patient_weight,
+            "modality": modality,
+            "subtype": subtype,
             "image_path": str(image_path),
             "segmentation_path": str(seg_path) if seg_path.exists() else None,
             "label": int(row["Aneurysm Present"]),
@@ -71,7 +95,7 @@ def build_manifest(data_root: str) -> list[dict]:
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--data-root", default=".")
-    p.add_argument("--out", default="processed/manifest.jsonl")
+    p.add_argument("--out", default="processed/data-manifest.jsonl")
     args = p.parse_args()
 
     m = build_manifest(args.data_root)
