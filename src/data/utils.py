@@ -1,12 +1,17 @@
-
-
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 from pydicom import dcmread
 from pydicom.dataset import Dataset
-from pydicom.pixel_handlers.util import apply_voi_lut
+from pydicom.pixel_data_handlers.util import apply_voi_lut
+
+# NOTE: For RLE/JPEG transfer syntaxes, install the pixel decoders:
+#   uv pip install pydicom pylibjpeg pylibjpeg-rle pylibjpeg-libjpeg
+#
+# All loaders below return float32 volumes in [0, 1] with shape (Z, H, W).
+
+FIXED_CT_WINDOW: tuple[float, float] = (300.0, 1000.0)
 
 
 def list_dicom_files(series_path: Path) -> list[Path]:
@@ -18,7 +23,10 @@ def list_dicom_files(series_path: Path) -> list[Path]:
 
 
 def load_slices(files: list[Path]) -> list[Dataset]:
-    """Load DICOMs and sort by InstanceNumber, fallback to filename."""
+    """
+    Load DICOMs and sort by geometric Z (ImagePositionPatient[2]),
+    falling back to InstanceNumber, then filename order.
+    """
     ds_list = [dcmread(str(fp)) for fp in files]
     try:
         ds_list.sort(key=lambda ds: float(ds.ImagePositionPatient[2]))
@@ -93,3 +101,84 @@ def center_pad_or_crop_z(vol: np.ndarray, target_z: Optional[int]) -> np.ndarray
         return np.pad(vol, ((p0, p1), (0, 0), (0, 0)), mode="constant")
     start = (z - target_z) // 2
     return vol[start : start + target_z]
+
+
+def load_series_ct(
+    series_dir: str,
+    target_slices: Optional[int] = None,
+    window: tuple[float, float] = FIXED_CT_WINDOW,
+) -> np.ndarray:
+    """
+    Load a CT/CTA series as (Z,H,W) float32 in [0,1].
+    Always applies the fixed angiography window (center=300, width=1000) unless overridden.
+    """
+    files = list_dicom_files(Path(series_dir))
+    ds_list = load_slices(files)
+
+    wc, ww = window
+    vol_hu = np.stack([to_hu(ds, ds.pixel_array) for ds in ds_list], axis=0)
+    vol = window_hu(vol_hu, wc, ww)
+    return center_pad_or_crop_z(vol, target_slices)
+
+
+def load_series_mr(
+    series_dir: str,
+    subtype: str,
+    target_slices: Optional[int] = None,
+) -> np.ndarray:
+    """
+    Load an MR/MRA series as (Z, H, W) float32 in [0, 1].
+    - MRA: VOI/LUT or per-slice min-max (to preserve vessel contrast)
+    - MRI T2 / MRI T1post / MR: volume-wise z-score -> clamp -> [0, 1]
+    Handles both multi-frame Enhanced MR and classic one-file-per-slice MR.
+    """
+    files = list_dicom_files(Path(series_dir))
+
+    # Fast header-only peek to decide the path
+    first_hdr = dcmread(files[0], stop_before_pixels=True)
+    if is_multiframe(first_hdr):
+        first = dcmread(str(files[0]))
+        vol = first.pixel_array.astype(np.float32)
+        # Try to sort frames by Z using Per-frame Functional Groups
+        try:
+            pffg = first.PerFrameFunctionalGroupsSequence
+            z = [
+                float(fr.PlanePositionSequence[0].ImagePositionPatient[2])
+                for fr in pffg
+            ]
+            vol = vol[np.argsort(z)]
+        except Exception:
+            pass
+
+        if subtype == "MRA":
+            mn = vol.min(axis=(1, 2), keepdims=True)
+            mx = vol.max(axis=(1, 2), keepdims=True)
+            den = np.maximum(mx - mn, 1e-6)
+            vol = np.clip((vol - mn) / den, 0.0, 1.0).astype(np.float32)
+        else:
+            vol = zscore_to_unit(vol)
+
+        return center_pad_or_crop_z(vol, target_slices)
+
+    # Classic MR: load & sort all slices (with pixels), then normalize
+    ds_list = load_slices(files)
+    if subtype == "MRA":
+        sl = [apply_voi_or_minmax(ds, ds.pixel_array) for ds in ds_list]
+        vol = np.stack(sl, axis=0).astype(np.float32)
+    else:
+        vol = np.stack([ds.pixel_array.astype(np.float32) for ds in ds_list], axis=0)
+        vol = zscore_to_unit(vol)
+
+    return center_pad_or_crop_z(vol, target_slices)
+
+
+def load_series_auto(
+    series_dir: str,
+    subtype: Optional[str] = None,
+    target_slices: Optional[int] = None,
+) -> np.ndarray:
+    if subtype in {"CT", "CTA"}:
+        return load_series_ct(
+            series_dir, target_slices=target_slices, window=FIXED_CT_WINDOW
+        )
+    return load_series_mr(series_dir, subtype=subtype, target_slices=target_slices)
