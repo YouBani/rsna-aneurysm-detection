@@ -12,7 +12,12 @@ from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
 from src.data import build_loaders
 from src.models.model import build_3d_model
 from src.trainer.loops import train_one_epoch, validate
-from src.trainer.utils import build_binary_metrics, seed_all, pos_weight_from_jsonl, save_checkpoint
+from src.trainer.utils import (
+    build_binary_metrics,
+    seed_all,
+    pos_weight_from_jsonl,
+    save_checkpoint,
+)
 
 
 def train(
@@ -27,7 +32,6 @@ def train(
     checkpoint_dir: str,
     scaler: Optional[GradScaler | None] = None,
 ) -> dict[str, Any]:
-    
     seed_all(seed)
 
     scaler = GradScaler(enabled=scaler is not None)
@@ -62,10 +66,15 @@ def train(
             device=device,
         )
 
+        t_acc = train_out.get("train/acc", float("nan"))
+        t_auc = train_out.get("train/auroc", float("nan"))
+        v_acc = train_out.get("val/acc", float("nan"))
+        v_auc = train_out.get("val/auroc", float("nan"))
+
         print(
             f"Epoch {epoch}/{epochs} | "
-            f"train: loss={train_out['train/loss']:.4f}, acc={train_out['train/acc']:.4f}, auroc={train_out['train/auroc']:.4f} | "
-            f"val:   loss={val_out['val/loss']:.4f}, acc={val_out['val/acc']:.4f}, auroc={val_out['val/auroc']:.4f}"
+            f"train: loss={train_out['train/loss']:.4f}, acc={t_acc:.4f}, auroc={t_auc:.4f} | "
+            f"val:   loss={val_out['val/loss']:.4f}, acc={v_acc:.4f}, auroc={v_auc:.4f}"
         )
 
         save_checkpoint(
@@ -74,7 +83,7 @@ def train(
             optimizer.state_dict(),
             epoch=epoch,
         )
-        current_auroc = val_out['val/auroc']
+        current_auroc = val_out["val/auroc"]
         if current_auroc > best_auroc:
             best_auroc = current_auroc
             save_checkpoint(
@@ -85,9 +94,9 @@ def train(
             )
             print(f"New best AUROC={best_auroc:.4f} - saved {best_auroc}")
 
-        return {
-            "auroc": val_out['val/auroc'],
-            "ap": val_out['val/ap'],
-            "best_model_path": best_path,
-            "last_model_path": last_path,
-        }
+    return {
+        "auroc": val_out["val/auroc"],
+        "ap": val_out["val/ap"],
+        "best_model_path": best_path,
+        "last_model_path": last_path,
+    }
