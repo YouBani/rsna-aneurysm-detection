@@ -18,7 +18,7 @@ FIXED_CT_WINDOW: tuple[float, float] = (300.0, 1000.0)
 
 def safe_float(value, default: float = -1.0) -> float:
     """Safely converts a value to a float, handling None or errors."""
-    if value in None:
+    if value is None:
         return default
     try:
         return float(value)
