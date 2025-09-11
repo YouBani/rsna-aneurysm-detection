@@ -3,8 +3,9 @@ import json
 import numpy as np
 from pathlib import Path
 from torch.utils.data import Dataset
-from .utils import load_series_auto
+from .utils import safe_float, load_series_auto
 
+from typing import Optional
 
 class RSNADataset(Dataset):
     """
@@ -22,7 +23,7 @@ class RSNADataset(Dataset):
       }
     """
 
-    def __init__(self, jsonl_path: str, target_slices=125, cache_dir: str | None=None, transform=None):
+    def __init__(self, jsonl_path: str, target_slices=125, cache_dir: Optional[str]=None, transform=None):
         self.rows = [json.loads(l) for l in Path(jsonl_path).read_text().splitlines()]
         self.target_slices = target_slices
         self.cache = Path(cache_dir) if cache_dir else None
@@ -75,9 +76,8 @@ class RSNADataset(Dataset):
                 np.save(cache_path, vol)
 
         sex = self._parse_sex(row.get("patient_sex"))
-        age = float(row.get("patient_age", -1))
-        weight_str = row.get("patient_weight", "-1")
-        weight = float(weight_str if weight_str else "-1")
+        age = safe_float(row.get("patient_age"),   -1.0)
+        weight = safe_float(row.get("patient_weight"), -1.0)
 
         x = torch.from_numpy(vol).unsqueeze(0).float()
         if self.transform:
