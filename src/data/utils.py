@@ -6,12 +6,24 @@ from pydicom import dcmread
 from pydicom.dataset import Dataset
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 
+from scipy.ndimage import gaussian_filter1d as _gauss1d
+
 # NOTE: For RLE/JPEG transfer syntaxes, install the pixel decoders:
 #   uv pip install pydicom pylibjpeg pylibjpeg-rle pylibjpeg-libjpeg
 #
 # All loaders below return float32 volumes in [0, 1] with shape (Z, H, W).
 
 FIXED_CT_WINDOW: tuple[float, float] = (300.0, 1000.0)
+
+
+def safe_float(value, default: float = -1.0) -> float:
+    """Safely converts a value to a float, handling None or errors."""
+    if value in None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
 
 
 def list_dicom_files(series_path: Path) -> list[Path]:
@@ -88,24 +100,115 @@ def zscore_to_unit(vol: np.ndarray, clamp: float = 5.0) -> np.ndarray:
     return vol.astype(np.float32)
 
 
-def center_pad_or_crop_z(vol: np.ndarray, target_z: Optional[int]) -> np.ndarray:
-    """Center pad or crop a 3D volume along the Z-axis to a target size."""
-    if target_z is None:
+def z_from_classic(ds_list) -> Optional[np.ndarray]:
+    """
+    Get per-slice physical Z using ImageOrientationPatient + ImagePositionPatient.
+    Falls back to IPP[2]. Returns None if positions unavailable.
+    """
+    try:
+        iop = np.asarray(ds_list[0].ImageOrientationPatient, dtype=np.float32)  # (6,)
+        row, col = iop[:3], iop[3:]
+        n = np.cross(row, col)  # slice normal
+        zs = []
+        for i, ds in enumerate(ds_list):
+            ipp = np.asarray(
+                getattr(ds, "ImagePositionPatient", [0, 0, i])[:3], dtype=np.float32
+            )
+            zs.append(float(np.dot(ipp, n)))
+        return np.asarray(zs, dtype=np.float32)
+    except Exception:
+        try:
+            return np.asarray(
+                [float(ds.ImagePositionPatient[2]) for ds in ds_list], dtype=np.float32
+            )
+        except Exception:
+            return None
+
+
+def z_from_multiframe(ds) -> Optional[np.ndarray]:
+    """
+    Enhanced multi-frame: per-frame Z from PerFrameFunctionalGroupsSequence
+    """
+    try:
+        pffg = ds.PerFrameFunctionalGroupsSequence
+        zs = [float(fr.PlanePositionSequence[0].ImagePositionPatient[2]) for fr in pffg]
+        return np.asarray(zs, dtype=np.float32)
+    except Exception:
+        return None
+
+
+def _anti_alias_if_needed(vol: np.ndarray, target_z: int, enable: bool) -> np.ndarray:
+    """
+    Apply a light Gaussian blur along Z before downsampling to reduce aliasing
+    (useful for very long CTA stacks). No-op if not downsampling.
+    """
+    z = vol.shape[0]
+    if z <= target_z:
         return vol
-    z, h, w = vol.shape
-    if z == target_z:
+    factor = z / float(target_z)
+    sigma = 0.5 * min(max(factor - 1.0, 0.0), 2.0)
+    if sigma <= 0:
         return vol
-    if z < target_z:
-        pad = target_z - z
-        p0, p1 = pad // 2, pad - pad // 2
-        return np.pad(vol, ((p0, p1), (0, 0), (0, 0)), mode="constant")
-    start = (z - target_z) // 2
-    return vol[start : start + target_z]
+    # Only along Z (axis=0), 'nearest' matches edge behavior of medical stacks.
+    return _gauss1d(vol, sigma=sigma, axis=0, mode="nearest")
+
+
+def _resample_linear_spacing_aware(
+    vol: np.ndarray, target_z: int, z_pos: Optional[np.ndarray]
+) -> np.ndarray:
+    """
+    Core spacing-aware linear resampler along Z.
+    - If z_pos provided, interpolate in physical space.
+    - Else, interpolate in index space [0..Z-1].
+    Returns float32 (target_z, H, W).
+    """
+    z, *_ = vol.shape
+    if target_z is None or target_z == z:
+        return vol.astype(np.float32, copy=False)
+
+    if z <= 1:
+        return np.repeat(vol, repeats=target_z, axis=0).astype(np.float32, copy=False)
+
+    if z_pos is not None and len(z_pos) == z:
+        # Sort by position and drop duplicates
+        order = np.argsort(z_pos)
+        zp = np.asarray(z_pos, np.float32)[order]
+        vol = vol[order]
+        keep = np.concatenate([[True], np.diff(zp) > 1e-6])
+        zp, vol = zp[keep], vol[keep]
+        z = len(zp)
+        # Map target physical positions to fractional old indices
+        new_pos = np.linspace(zp[0], zp[-1], target_z, dtype=np.float32)
+        old_idx = np.arange(z, dtype=np.float32)
+        frac = np.interp(new_pos, zp, old_idx)
+    else:
+        frac = np.linspace(0, z - 1, target_z, dtype=np.float32)
+
+    i0 = np.floor(frac).astype(int)
+    i1 = np.clip(i0 + 1, 0, z - 1)
+    t = (frac - i0).reshape(-1, 1, 1).astype(np.float32)
+
+    out = (1.0 - t) * vol[i0].astype(np.float32) + t * vol[i1].astype(np.float32)
+    return out
+
+
+def resample_z(
+    vol: np.ndarray,
+    target_z: int,
+    z_pos: Optional[np.ndarray] = None,
+    *,
+    antialiasing: bool = False,
+) -> np.ndarray:
+    """
+    Public API. Optional anti-alias (Gaussian) is applied only when downsampling.
+    """
+    vol = _anti_alias_if_needed(vol, target_z, enable=antialiasing)
+    return _resample_linear_spacing_aware(vol, target_z, z_pos)
 
 
 def load_series_ct(
     series_dir: str,
-    target_slices: Optional[int] = None,
+    target_slices: int,
     window: tuple[float, float] = FIXED_CT_WINDOW,
 ) -> np.ndarray:
     """
@@ -118,13 +221,15 @@ def load_series_ct(
     wc, ww = window
     vol_hu = np.stack([to_hu(ds, ds.pixel_array) for ds in ds_list], axis=0)
     vol = window_hu(vol_hu, wc, ww)
-    return center_pad_or_crop_z(vol, target_slices)
+
+    z_pos = z_from_classic(ds_list)
+    return resample_z(vol, target_slices, z_pos=z_pos, antialiasing=True)
 
 
 def load_series_mr(
     series_dir: str,
-    subtype: str,
-    target_slices: Optional[int] = None,
+    target_slices: int,
+    subtype: Optional[str] = None,
 ) -> np.ndarray:
     """
     Load an MR/MRA series as (Z, H, W) float32 in [0, 1].
@@ -137,11 +242,11 @@ def load_series_mr(
     # Fast header-only peek to decide the path
     first_hdr = dcmread(files[0], stop_before_pixels=True)
     if is_multiframe(first_hdr):
-        first = dcmread(str(files[0]))
-        vol = first.pixel_array.astype(np.float32)
+        ds = dcmread(str(files[0]))
+        vol = ds.pixel_array.astype(np.float32)
         # Try to sort frames by Z using Per-frame Functional Groups
         try:
-            pffg = first.PerFrameFunctionalGroupsSequence
+            pffg = ds.PerFrameFunctionalGroupsSequence
             z = [
                 float(fr.PlanePositionSequence[0].ImagePositionPatient[2])
                 for fr in pffg
@@ -158,7 +263,8 @@ def load_series_mr(
         else:
             vol = zscore_to_unit(vol)
 
-        return center_pad_or_crop_z(vol, target_slices)
+        z_pos = z_from_multiframe(ds)
+        return resample_z(vol, target_slices, z_pos=z_pos, antialiasing=False)
 
     # Classic MR: load & sort all slices (with pixels), then normalize
     ds_list = load_slices(files)
@@ -169,13 +275,14 @@ def load_series_mr(
         vol = np.stack([ds.pixel_array.astype(np.float32) for ds in ds_list], axis=0)
         vol = zscore_to_unit(vol)
 
-    return center_pad_or_crop_z(vol, target_slices)
+    z_pos = z_from_classic(ds_list)
+    return resample_z(vol, target_slices, z_pos=z_pos, antialiasing=False)
 
 
 def load_series_auto(
     series_dir: str,
+    target_slices: int,
     subtype: Optional[str] = None,
-    target_slices: Optional[int] = None,
 ) -> np.ndarray:
     if subtype in {"CT", "CTA"}:
         return load_series_ct(
