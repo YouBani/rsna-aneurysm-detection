@@ -30,7 +30,7 @@ def train(
     epochs: int,
     seed: int,
     checkpoint_dir: str,
-    scaler: Optional[GradScaler | None] = None,
+    scaler: Optional[GradScaler]=None,
 ) -> dict[str, Any]:
     seed_all(seed)
 
