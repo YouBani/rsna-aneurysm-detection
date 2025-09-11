@@ -7,21 +7,30 @@ from src.models.model import build_3d_model
 from src.trainer.train import train
 from src.trainer.utils import seed_all, pos_weight_from_jsonl
 
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--train", required=True, help="Path to train.jsonl")
-    p.add_argument("--val",   required=True, help="Path to val.jsonl")
-    p.add_argument("--out",   required=True, help="Checkpoint directory")
-    p.add_argument("--cache", default=None,  help="Cache dir for preprocessed volumes (.npy)")
+    p.add_argument("--val", required=True, help="Path to val.jsonl")
+    p.add_argument("--out", required=True, help="Checkpoint directory")
+    p.add_argument(
+        "--cache", default=None, help="Cache dir for preprocessed volumes (.npy)"
+    )
     p.add_argument("--target_slices", type=int, default=128)
     p.add_argument("--epochs", type=int, default=15)
-    p.add_argument("--bs",     type=int, default=2)
-    p.add_argument("--lr",     type=float, default=1e-3)
-    p.add_argument("--wd",     type=float, default=1e-4)
+    p.add_argument("--bs", type=int, default=2)
+    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--wd", type=float, default=1e-4)
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--amp", action="store_true", help="Enable mixed precision (fp16/bf16)")
-    p.add_argument("--bf16", action="store_true", help="Prefer bfloat16 over fp16 when --amp is used")
+    p.add_argument(
+        "--amp", action="store_true", help="Enable mixed precision (fp16/bf16)"
+    )
+    p.add_argument(
+        "--bf16",
+        action="store_true",
+        help="Prefer bfloat16 over fp16 when --amp is used",
+    )
     return p.parse_args()
 
 
@@ -33,7 +42,7 @@ def main():
     Path(args.out).mkdir(parents=True, exist_ok=True)
 
     # Data
-    train_loader, val_loader, train_ds, _ = build_loaders(
+    train_loader, val_loader, train_ds, val_ds = build_loaders(
         train_jsonl=args.train,
         val_jsonl=args.val,
         batch_size=args.bs,
@@ -54,7 +63,7 @@ def main():
     # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
-    _ = train(
+    summary = train(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
@@ -64,5 +73,10 @@ def main():
         epochs=args.epochs,
         seed=args.seed,
         checkpoint_dir=args.out,
-        
     )
+
+    print(summary)
+
+
+if __name__ == "__main__":
+    main()
