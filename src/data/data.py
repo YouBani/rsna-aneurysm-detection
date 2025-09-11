@@ -29,7 +29,7 @@ def build_loaders(
     *,
     batch_size: int = 2,
     num_workers: int = 4,
-    cache_dir: Optional[str]=None,
+    cache_dir: Optional[str] = None,
     target_slices: int = 128,
     seed: int = 42,
     weighted_sampling: bool = True,
@@ -40,7 +40,9 @@ def build_loaders(
     Build train/val DataLoaders for 3D volumes coming from RSNADataset.
     Returns: train_loader, val_loader, train_ds, val_ds
     """
-    train_ds = RSNADataset(train_jsonl, target_slices=target_slices, cache_dir=cache_dir)
+    train_ds = RSNADataset(
+        train_jsonl, target_slices=target_slices, cache_dir=cache_dir
+    )
     val_ds = RSNADataset(val_jsonl, target_slices=target_slices, cache_dir=cache_dir)
 
     g = torch.Generator().manual_seed(42)
@@ -53,9 +55,11 @@ def build_loaders(
         neg = len(labels) - pos
         weights = {0: 1.0 / max(neg, 1), 1: 1.0 / max(pos, 1)}
         sample_weights = [weights[y] for y in labels]
-        
-        sampler = WeightedRandomSampler(sample_weights, num_samples=len(labels), replacement=True, generator=g)
-        shuffle = False 
+
+        sampler = WeightedRandomSampler(
+            sample_weights, num_samples=len(labels), replacement=True, generator=g
+        )
+        shuffle = False
 
     train_loader = DataLoader(
         train_ds,
