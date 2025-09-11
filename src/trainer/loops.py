@@ -17,7 +17,7 @@ def train_one_epoch(
     metrics: MetricCollection,
     epoch: int,
     device: str,
-    scaler: Optional[GradScaler | None] = None,
+    scaler: Optional[GradScaler]=None,
 ) -> dict[str, float]:
     """
     """
@@ -36,7 +36,7 @@ def train_one_epoch(
         y = batch["label"].to(device, non_blocking=True) # (B,)
 
         optimizer.zero_grad(set_to_none=True)
-        with autocast(enabled=scaler is not None):
+        with autocast(device_type=device.type, enabled=scaler is not None):
             logits = model(x).squeeze(1)                 # (B,)
             loss = loss_fn(logits, y)
 
