@@ -1,6 +1,7 @@
 import json
 import random
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import torch
@@ -28,7 +29,7 @@ def build_loaders(
     *,
     batch_size: int = 2,
     num_workers: int = 4,
-    cache_dir: str | None = None,
+    cache_dir: Optional[str]=None,
     target_slices: int = 128,
     seed: int = 42,
     weighted_sampling: bool = True,
