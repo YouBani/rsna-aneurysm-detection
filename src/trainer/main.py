@@ -25,8 +25,14 @@ def parse_args():
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--amp", action="store_true", help="Enable mixed precision (fp16)")
-    p.add_argument("--empty_cache_every", type=int, default=50,
-                help="Call torch.cuda.empty_cache() every N steps (0 to disable)")
+    p.add_argument("--bf16", action="store_true", help="Enable mixed precision (bf16)")
+    p.add_argument("--ckpt", action="store_true", help="Enable gradient checkpointing")
+    p.add_argument(
+        "--empty_cache_every",
+        type=int,
+        default=50,
+        help="Call torch.cuda.empty_cache() every N steps (0 to disable)",
+    )
     return p.parse_args()
 
 
@@ -50,7 +56,9 @@ def main():
     )
 
     # Model
-    model = build_3d_model(in_channels=1, num_classes=1).to(device)
+    model = build_3d_model(in_channels=1, num_classes=1, checkpointing=args.ckpt).to(
+        device
+    )
 
     # Loss (class imbalance from TRAIN jsonl)
     pos_w = pos_weight_from_jsonl(args.train).to(device)
@@ -59,10 +67,17 @@ def main():
     # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
-    scaler = GradScaler(enabled=args.amp)
+    if args.bf16:
+        amp_dtype = torch.bfloat16
+        scaler = GradScaler(enabled=False)
+        print("Using bfloat16 for mixed precision.")
+    else:
+        amp_dtype = torch.float16 if args.amp else None
+        scaler = GradScaler(enabled=args.amp)
 
     torch.backends.cudnn.benchmark = False
     torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
     summary = train(
         model=model,
@@ -75,7 +90,7 @@ def main():
         seed=args.seed,
         checkpoint_dir=args.out,
         scaler=scaler,
-        amp_dtype=torch.float16,
+        amp_dtype=amp_dtype,
         empty_cache_every=50,
     )
 
