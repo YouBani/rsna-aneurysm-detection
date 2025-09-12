@@ -38,7 +38,9 @@ def load_and_sort_headers(files: list[Path]) -> list[Dataset]:
     """
     Load ONLY DICOM headers and sort by geometric Z (ImagePositionPatient[2]).
     """
-    headers = [dcmread(str(fp), stop_before_pixels=True , defer_size="1 MB") for fp in files]
+    headers = [
+        dcmread(str(fp), stop_before_pixels=True, defer_size="1 MB") for fp in files
+    ]
 
     try:
         headers.sort(key=lambda ds: float(ds.ImagePositionPatient[2]))
@@ -48,7 +50,7 @@ def load_and_sort_headers(files: list[Path]) -> list[Dataset]:
             headers.sort(key=lambda ds: int(getattr(ds, "InstanceNumber", 0)))
         except Exception:
             pass
-        
+
     return headers
 
 
@@ -285,12 +287,21 @@ def load_series_mr(
         return resample_z(vol, target_slices, z_pos=z_pos, antialiasing=False)
 
     # Classic MR: load & sort all slices (with pixels), then normalize
-    ds_list = load_slices(files)
+    headers = load_and_sort_headers(files)
+
+    num_slices = len(headers)
+    height = headers[0].Rows
+    columns = headers[0].Columns
+    vol = np.empty((num_slices, height, columns), dtype=np.float32)
+
     if subtype == "MRA":
-        sl = [apply_voi_or_minmax(ds, ds.pixel_array) for ds in ds_list]
-        vol = np.stack(sl, axis=0).astype(np.float32)
+        for i, header in enumerate(headers):
+            ds = dcmread(header.filename)
+            vol[i] = apply_voi_or_minmax(ds, ds.pixel_array)
     else:
-        vol = np.stack([ds.pixel_array.astype(np.float32) for ds in ds_list], axis=0)
+        for i, header in enumerate(headers):
+            ds = dcmread(header.filename)
+            vol[i] = ds.pixel_array.astype(np.float32)
         vol = zscore_to_unit(vol)
 
     z_pos = z_from_classic(ds_list)
