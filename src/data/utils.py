@@ -34,21 +34,22 @@ def list_dicom_files(series_path: Path) -> list[Path]:
     return files
 
 
-def load_slices(files: list[Path]) -> list[Dataset]:
+def load_and_sort_headers(files: list[Path]) -> list[Dataset]:
     """
-    Load DICOMs and sort by geometric Z (ImagePositionPatient[2]),
-    falling back to InstanceNumber, then filename order.
+    Load ONLY DICOM headers and sort by geometric Z (ImagePositionPatient[2]).
     """
-    ds_list = [dcmread(str(fp)) for fp in files]
+    headers = [dcmread(str(fp), stop_before_pixels=True , defer_size="1 MB") for fp in files]
+
     try:
-        ds_list.sort(key=lambda ds: float(ds.ImagePositionPatient[2]))
+        headers.sort(key=lambda ds: float(ds.ImagePositionPatient[2]))
     except Exception:
         # Some series may have missing InstanceNumber; fallback to filename order
         try:
-            ds_list.sort(key=lambda ds: int(getattr(ds, "InstanceNumber", 0)))
+            headers.sort(key=lambda ds: int(getattr(ds, "InstanceNumber", 0)))
         except Exception:
-            ds_list = [dcmread(str(fp)) for fp in sorted(files)]
-    return ds_list
+            pass
+        
+    return headers
 
 
 def is_multiframe(ds: Dataset) -> bool:
@@ -212,17 +213,28 @@ def load_series_ct(
     window: tuple[float, float] = FIXED_CT_WINDOW,
 ) -> np.ndarray:
     """
-    Load a CT/CTA series as (Z,H,W) float32 in [0,1].
+    Memory-efficient loads a CT/CTA series as (Z,H,W) float32 in [0,1].
     Always applies the fixed angiography window (center=300, width=1000) unless overridden.
     """
     files = list_dicom_files(Path(series_dir))
-    ds_list = load_slices(files)
+    headers = load_and_sort_headers(files)
+
+    num_slices = len(headers)
+    height = headers[0].Rows
+    width = headers[0].Columns
+    vol_hu = np.empty((num_slices, height, width), dtype=np.float32)
+
+    full_ds_list = []
+
+    for i, header in enumerate(headers):
+        ds = dcmread(header.filename)
+        vol_hu[i] = to_hu(ds, ds.pixel_array)
+        full_ds_list.append(ds)
 
     wc, ww = window
-    vol_hu = np.stack([to_hu(ds, ds.pixel_array) for ds in ds_list], axis=0)
     vol = window_hu(vol_hu, wc, ww)
+    z_pos = z_from_classic(full_ds_list)
 
-    z_pos = z_from_classic(ds_list)
     return resample_z(vol, target_slices, z_pos=z_pos, antialiasing=True)
 
 
