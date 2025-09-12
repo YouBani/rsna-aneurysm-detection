@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 
 import torch
+from torch.amp import GradScaler
 from src.data import build_loaders
 from src.models.model import build_3d_model
 from src.trainer.train import train
@@ -23,14 +24,9 @@ def parse_args():
     p.add_argument("--wd", type=float, default=1e-4)
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument(
-        "--amp", action="store_true", help="Enable mixed precision (fp16/bf16)"
-    )
-    p.add_argument(
-        "--bf16",
-        action="store_true",
-        help="Prefer bfloat16 over fp16 when --amp is used",
-    )
+    p.add_argument("--amp", action="store_true", help="Enable mixed precision (fp16)")
+    p.add_argument("--empty_cache_every", type=int, default=50,
+                help="Call torch.cuda.empty_cache() every N steps (0 to disable)")
     return p.parse_args()
 
 
@@ -63,6 +59,11 @@ def main():
     # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
+    scaler = GradScaler(enabled=args.amp)
+
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.matmul.allow_tf32 = True
+
     summary = train(
         model=model,
         train_loader=train_loader,
@@ -73,6 +74,9 @@ def main():
         epochs=args.epochs,
         seed=args.seed,
         checkpoint_dir=args.out,
+        scaler=scaler,
+        amp_dtype=torch.float16,
+        empty_cache_every=50,
     )
 
     print(summary)
