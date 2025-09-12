@@ -15,7 +15,7 @@ class CheckpointedSeq(nn.Module):
         if not self.training:
             return self.seq(x)
 
-        return checkpoint_sequential(self.seq, len(self.seq), x)
+        return checkpoint_sequential(self.seq, len(self.seq), x, use_reentrant=False)
 
 
 def build_3d_model(
