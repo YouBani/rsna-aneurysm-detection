@@ -26,15 +26,15 @@ def train(
     val_loader: DataLoader,
     optimizer: Optimizer,
     loss_fn: nn.Module,
-    device: str,
+    device: torch.device,
     epochs: int,
     seed: int,
     checkpoint_dir: str,
     scaler: Optional[GradScaler]=None,
+    amp_dtype: torch.dtype = torch.float16,
+    empty_cache_every: int = 50,
 ) -> dict[str, Any]:
     seed_all(seed)
-
-    scaler = GradScaler(enabled=scaler is not None)
 
     base = build_binary_metrics().to(device)
     train_metrics = base.clone()
@@ -44,7 +44,7 @@ def train(
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     best_path = checkpoint_dir / "best_model.pth"
     last_path = checkpoint_dir / "last_model.pth"
-    best_auroc = 0.0
+    best_auroc = float("-inf")
 
     for epoch in range(1, epochs + 1):
         train_out = train_one_epoch(
@@ -56,7 +56,14 @@ def train(
             epoch=epoch,
             device=device,
             scaler=scaler,
+            amp_dtype=amp_dtype,
+            empty_cache_every=empty_cache_every,
         )
+
+        # free fragmentation between phases
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+
         val_out = validate(
             model=model,
             loader=val_loader,
@@ -64,6 +71,9 @@ def train(
             metrics=val_metrics,
             epoch=epoch,
             device=device,
+            amp=(scaler is not None),
+            amp_dtype=amp_dtype,
+            empty_cache_every=empty_cache_every,
         )
 
         t_acc = train_out.get("train/acc", float("nan"))
