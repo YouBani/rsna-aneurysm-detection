@@ -244,6 +244,12 @@ def load_series_mr(
     if is_multiframe(first_hdr):
         ds = dcmread(str(files[0]))
         vol = ds.pixel_array.astype(np.float32)
+        vol = np.asarray(vol)
+        if vol.ndim == 2:
+            vol = vol[None, :, :]
+        if vol.ndim != 3:
+            raise ValueError(f"Expected 3D volume, got shape {vol.shape}")
+
         # Try to sort frames by Z using Per-frame Functional Groups
         try:
             pffg = ds.PerFrameFunctionalGroupsSequence
