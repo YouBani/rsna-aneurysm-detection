@@ -103,17 +103,17 @@ def zscore_to_unit(vol: np.ndarray, clamp: float = 5.0) -> np.ndarray:
     return vol.astype(np.float32)
 
 
-def z_from_classic(ds_list) -> Optional[np.ndarray]:
+def z_from_classic(headers: list[Dataset]) -> Optional[np.ndarray]:
     """
     Get per-slice physical Z using ImageOrientationPatient + ImagePositionPatient.
     Falls back to IPP[2]. Returns None if positions unavailable.
     """
     try:
-        iop = np.asarray(ds_list[0].ImageOrientationPatient, dtype=np.float32)  # (6,)
+        iop = np.asarray(headers[0].ImageOrientationPatient, dtype=np.float32)  # (6,)
         row, col = iop[:3], iop[3:]
         n = np.cross(row, col)  # slice normal
         zs = []
-        for i, ds in enumerate(ds_list):
+        for i, ds in enumerate(headers):
             ipp = np.asarray(
                 getattr(ds, "ImagePositionPatient", [0, 0, i])[:3], dtype=np.float32
             )
@@ -122,7 +122,7 @@ def z_from_classic(ds_list) -> Optional[np.ndarray]:
     except Exception:
         try:
             return np.asarray(
-                [float(ds.ImagePositionPatient[2]) for ds in ds_list], dtype=np.float32
+                [float(ds.ImagePositionPatient[2]) for ds in headers], dtype=np.float32
             )
         except Exception:
             return None
@@ -227,7 +227,6 @@ def load_series_ct(
     vol_hu = np.empty((num_slices, height, width), dtype=np.float32)
 
     full_ds_list = []
-
     for i, header in enumerate(headers):
         ds = dcmread(header.filename)
         vol_hu[i] = to_hu(ds, ds.pixel_array)
@@ -304,7 +303,7 @@ def load_series_mr(
             vol[i] = ds.pixel_array.astype(np.float32)
         vol = zscore_to_unit(vol)
 
-    z_pos = z_from_classic(ds_list)
+    z_pos = z_from_classic(ds)
     return resample_z(vol, target_slices, z_pos=z_pos, antialiasing=False)
 
 

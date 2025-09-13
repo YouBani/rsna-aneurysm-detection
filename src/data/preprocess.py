@@ -4,10 +4,16 @@ import numpy as np
 from pathlib import Path
 from src.data.utils import load_series_auto
 from multiprocessing import Pool, cpu_count
+from typing import Any, Optional
 
 
-def process_series(args_tuple):
-    """Worker function to process a single DICOM series"""
+def _process_series(
+    args_tuple: tuple[dict[str, Any], Path, int],
+) -> Optional[tuple[str, str]]:
+    """
+    Worker function to process a single DICOM series.
+    Returns None on success or an (series_id, error_message) on failure.
+    """
     row, cache_dir, target_slices = args_tuple
     series_id = row["id"]
     subtype = row.get("subtype")
@@ -27,17 +33,25 @@ def process_series(args_tuple):
 
         np.save(output_path, vol)
         return None
+    except FileNotFoundError as e:
+        return series_id, f"File not found error: {e}"
     except Exception as e:
-        return f"Error processing series {series_id}: {e}"
+        return series_id, f"An unexpected error occured: {e}"
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="Preprocess DICOM series to .npy files.")
     p.add_argument(
-        "--jsonl_path", type=Path, help="Path to the train or val jsonl file."
+        "--jsonl_path",
+        type=Path,
+        required=True,
+        help="Path to the train or val jsonl file.",
     )
     p.add_argument(
-        "--cache_dir", type=Path, help="Directory to save the processed .npy files."
+        "--cache_dir",
+        type=Path,
+        required=True,
+        help="Directory to save the processed .npy files.",
     )
     p.add_argument(
         "--target_slices",
@@ -55,11 +69,10 @@ def parse_args():
 
 
 def main():
-    """
-    Main function to orchestrate the offline preprocessing.
-    """
+    """Main function to orchestrate the offline preprocessing."""
     args = parse_args()
     print(f"Starting preprocessing for: {args.jsonl_path.name}")
+    args.cache_dir.mkdir(parents=True, exist_ok=True)
 
     with open(args.jsonl_path) as f:
         rows = [json.loads(line) for line in f]
@@ -70,9 +83,10 @@ def main():
     print(f"Found {len(tasks)} series to process.")
     errors = []
     with Pool(processes=args.num_workers) as pool:
-        for result in pool.imap_unordered(process_series, tasks):
+        for result in pool.imap_unordered(_process_series, tasks):
             if result is not None:
-                errors.append(result)
+                series_id, error_msg = result
+                errors.append((series_id, error_msg))
 
     print("\nPreprocessing finished.")
 
@@ -86,28 +100,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# ```
-
-### How to Use It
-
-# 1.  **Save the file** as `src/preprocess.py`.
-# 2.  **Run it from your terminal** for both your training and validation sets. You'll need to adjust the paths to match your system.
-
-# **Example for your training data:**
-# ```bash
-# python -m src.preprocess \
-#     /fsx/path/to/your/train.jsonl \
-#     /fsx/path/to/raw/dicom/data \
-#     /fsx/cache_z64 \
-#     --target_slices 64 \
-#     --num_workers 4
-# ```
-
-# **Example for your validation data:**
-# ```bash
-# python -m src.preprocess \
-#     /fsx/path/to/your/val.jsonl \
-#     /fsx/path/to/raw/dicom/data \
-#     /fsx/cache_z64 \
-#     --target_slices 64 \
-#     --num_workers 8
