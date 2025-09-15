@@ -31,7 +31,7 @@ def _process_series(
     series_dir_str = row.get("image_path")
 
     if not series_dir_str:
-        return series_id, "image_path key is missing or empty in jslon row."
+        return str(series_id), "image_path key is missing or empty in jslon row."
 
     series_dir = Path(series_dir_str)
 
@@ -50,9 +50,9 @@ def _process_series(
         np.save(output_path, vol)
         return None
     except FileNotFoundError as e:
-        return series_id, f"File not found error: {e}"
+        return str(series_id), f"File not found error: {e}"
     except Exception as e:
-        return series_id, f"An unexpected error occured: {e}"
+        return str(series_id), f"An unexpected error occured: {e}"
 
 
 def parse_args() -> argparse.Namespace:
@@ -101,7 +101,8 @@ def main():
     errors = []
     success_count = 0
 
-    with Pool(processes=args.num_workers) as pool:
+    pool = Pool(processes=args.num_workers)
+    try:
         with tqdm(total=len(tasks), desc="Processing Series") as pbar:
             for result in pool.imap_unordered(_process_series, tasks):
                 if result is not None:
@@ -111,6 +112,13 @@ def main():
                 else:
                     success_count += 1
                 pbar.update(1)
+
+    finally:
+        logging.info("All tasks processed. Shutting down worker pool...")
+        pool.close()
+        pool.join(timeout=10)
+        pool.terminate()
+        logging.info("Worker pool has been shut down.")
 
     logging.info("\n--- Preprocessing Finished ---")
     logging.info(f"Successfully processed: {success_count} series")
