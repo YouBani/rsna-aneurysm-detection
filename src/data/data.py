@@ -1,6 +1,5 @@
 import json
 import random
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -77,6 +76,7 @@ def build_loaders(
         persistent_workers=(num_workers > 0),
         generator=(g if sampler is None else None),
         drop_last=False,
+        timeout=120,
         **kwargs,
     )
 
@@ -89,6 +89,7 @@ def build_loaders(
         worker_init_fn=_seed_worker,
         persistent_workers=(num_workers > 0),
         drop_last=False,
+        timeout=120,
         **kwargs,
     )
 
