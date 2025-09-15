@@ -4,10 +4,8 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torch.amp import autocast, GradScaler
 from torchmetrics import MetricCollection
-from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
+from tqdm import tqdm
 from typing import Optional
-
-DEFAULT_AMP_DTYPE = torch.float16
 
 
 def train_one_epoch(
@@ -17,47 +15,57 @@ def train_one_epoch(
     loss_fn: nn.Module,
     metrics: MetricCollection,
     epoch: int,
-    device: str,
+    device: torch.device,
+    amp_dtype: torch.dtype,
     scaler: Optional[GradScaler] = None,
-    amp_dtype: torch.dtype = DEFAULT_AMP_DTYPE,
+    accum_steps: int = 1,
+    amp_enabled: bool = True,
     empty_cache_every: int = 50,
 ) -> dict[str, float]:
-    """ """
     if len(loader) == 0:
         raise ValueError("Empty training DataLoader passed to train_one_epoch.")
 
     model.train()
-    metrics = metrics.to(device)
+    metrics = metrics.to("cpu")
     metrics.reset()
 
     total_loss = 0.0
     total_items = 0.0
 
-    for step, batch in enumerate(loader):
+    optimizer.zero_grad(set_to_none=True)
+
+    progress_bar = tqdm(loader, desc=f"Epoch{epoch} Train,", unit="batch")
+    for step, batch in enumerate(progress_bar):
         x = batch["image"].to(device, non_blocking=True)  # (B, 1, Z, H, W)
         y = batch["label"].to(device, non_blocking=True)  # (B,)
 
-        optimizer.zero_grad(set_to_none=True)
-        with autocast(device_type=device.type, enabled=(scaler is not None)):
+        with autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
             logits = model(x).squeeze(1)  # (B,)
-            loss = loss_fn(logits, y)
+            loss = loss_fn(logits, y) / accum_steps
 
-        if scaler:
+        if scaler is not None and scaler.is_enabled():
             scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
         else:
             loss.backward()
-            optimizer.step()
+
+        if (step + 1) % accum_steps == 0 or (step + 1) == len(loader):
+            if scaler is not None and scaler.is_enabled():
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
 
         with torch.no_grad():
             preds = torch.sigmoid(logits).detach().float().cpu()
             labels = (y > 0.5).int().cpu()
             metrics.update(preds, labels)
 
-        bs = x.size(0)
-        total_loss += float(loss.detach().cpu()) * bs
-        total_items += bs
+            bs = x.size(0)
+            total_loss += float(loss.detach().cpu()) * bs * accum_steps
+            total_items += bs
+
+            progress_bar.set_postfix(loss=loss.item() * accum_steps)
 
         del x, y, logits, preds, labels, loss
         if (step + 1) % empty_cache_every == 0:
@@ -77,34 +85,44 @@ def validate(
     loss_fn: nn.Module,
     metrics: MetricCollection,
     epoch: int,
-    device: str,
-    amp: bool = False,
-    amp_dtype: torch.dtype = DEFAULT_AMP_DTYPE,
+    device: torch.device,
+    amp_dtype: torch.dtype,
+    amp_enabled: bool = False,
     empty_cache_every: int = 50,
 ) -> dict[str, float]:
-    """ """
     model.eval()
-    metrics = metrics.to(device)
+    metrics = metrics.to("cpu")
     metrics.reset()
 
     total_loss = 0.0
     total_items = 0
 
-    for batch in loader:
+    progress_bar = tqdm(loader, desc=f"Epoch {epoch} Val", unit="batch")
+    for step, batch in enumerate(progress_bar):
         x = batch["image"].to(device, non_blocking=True)
         y = batch["label"].to(device, non_blocking=True)
 
-        with autocast(device_type=device.type, dtype=amp_dtype, enabled=amp):
+        with autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
             logits = model(x).squeeze(1)
             loss = loss_fn(logits, y)
 
         preds = torch.sigmoid(logits).detach().float().cpu()
+
+        # ------- TEMPORARY REMOVE !!!! ---
+        if step == 0:
+            print("[val] sample preds:", preds[:10])
+            print(
+                f"[val] sample preds: mean={preds.mean():.3f} min={preds.min():.3f} max={preds.max():.3f}"
+            )
+
         labels = (y > 0.5).int().cpu()
         metrics.update(preds, labels)
 
         bs = x.size(0)
         total_loss += float(loss.detach().cpu()) * bs
         total_items += bs
+
+        progress_bar.set_postfix(loss=loss.item())
 
         del x, y, logits, preds, labels, loss
         if (step + 1) % empty_cache_every == 0:
