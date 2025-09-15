@@ -24,14 +24,24 @@ def parse_args():
     p.add_argument("--wd", type=float, default=1e-4)
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--amp", action="store_true", help="Enable mixed precision (fp16)")
-    p.add_argument("--bf16", action="store_true", help="Enable mixed precision (bf16)")
+    p.add_argument(
+        "--precision",
+        default="fp32",
+        choices=["fp32", "fp16", "bf16"],
+        help="Set training precision: fp32, fp16 (mixed), bf16 (mixed)",
+    )
     p.add_argument("--ckpt", action="store_true", help="Enable gradient checkpointing")
     p.add_argument(
         "--empty_cache_every",
         type=int,
         default=50,
         help="Call torch.cuda.empty_cache() every N steps (0 to disable)",
+    )
+    p.add_argument(
+        "--accum_steps",
+        type=int,
+        default=1,
+        help="Number of steps to accumulate gradients before updating weights.",
     )
     return p.parse_args()
 
@@ -44,7 +54,7 @@ def main():
     Path(args.out).mkdir(parents=True, exist_ok=True)
 
     # Data
-    train_loader, val_loader, train_ds, val_ds = build_loaders(
+    train_loader, val_loader, *_ = build_loaders(
         train_jsonl=args.train,
         val_jsonl=args.val,
         batch_size=args.bs,
@@ -67,13 +77,18 @@ def main():
     # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
-    if args.bf16:
+    if args.precision == "bf16":
+        amp_enabled = True
         amp_dtype = torch.bfloat16
         scaler = GradScaler(enabled=False)
-        print("Using bfloat16 for mixed precision.")
+    elif args.precision == "fp16":
+        amp_enabled = True
+        amp_dtype = torch.float16
+        scaler = GradScaler(enabled=True)
     else:
-        amp_dtype = torch.float16 if args.amp else None
-        scaler = GradScaler(enabled=args.amp)
+        amp_enabled = False
+        amp_dtype = torch.float32
+        scaler = GradScaler(enabled=False)
 
     torch.backends.cudnn.benchmark = False
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -90,6 +105,8 @@ def main():
         seed=args.seed,
         checkpoint_dir=args.out,
         scaler=scaler,
+        accum_steps=args.accum_steps,
+        amp_enabled=amp_enabled,
         amp_dtype=amp_dtype,
         empty_cache_every=50,
     )
