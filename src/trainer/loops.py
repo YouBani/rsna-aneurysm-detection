@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
-from torch.amp import autocast, GradScaler
+from torch.amp.autocast_mode import autocast
+from torch.amp.grad_scaler import GradScaler
 from torchmetrics import MetricCollection
 from tqdm import tqdm
 from typing import Optional
@@ -107,13 +108,6 @@ def validate(
             loss = loss_fn(logits, y)
 
         preds = torch.sigmoid(logits).detach().float().cpu()
-
-        # ------- TEMPORARY REMOVE !!!! ---
-        if step == 0:
-            print("[val] sample preds:", preds[:10])
-            print(
-                f"[val] sample preds: mean={preds.mean():.3f} min={preds.min():.3f} max={preds.max():.3f}"
-            )
 
         labels = (y > 0.5).int().cpu()
         metrics.update(preds, labels)
