@@ -4,6 +4,22 @@ from torchvision.models.video import r3d_18
 from torch.utils.checkpoint import checkpoint_sequential
 
 
+def replace_bn_with_gn(module: nn.Module, num_groups: int = 32):
+    """Recursively find all BatchNorm3d layers and replace them with GroupNorm."""
+    for name, child in module.named_children():
+        if isinstance(child, nn.BatchNorm3d):
+            num_channels = child.num_features
+            setattr(
+                module,
+                name,
+                nn.GroupNorm(
+                    num_groups=min(num_groups, num_channels), num_channels=num_channels
+                ),
+            )
+        else:
+            replace_bn_with_gn(child, num_groups)
+
+
 class CheckpointedSeq(nn.Module):
     """Wraps an nn.Sequential with gradient checkpointing."""
 
@@ -22,6 +38,7 @@ def build_3d_model(
     in_channels: int = 1,
     num_classes: int = 1,
     checkpointing: bool = False,
+    use_groupnorm: bool = False,
 ) -> nn.Module:
     """
     3D ResNet-18 baseline for (C, Z, H, W) inputs.
@@ -29,6 +46,11 @@ def build_3d_model(
     Optionally enables gradient checkpointing on layer1 to 4.
     """
     model = r3d_18(weights=None)
+
+    if use_groupnorm:
+        print("Replacing BatchNorm with GroupNorm.")
+        replace_bn_with_gn(model)
+
     old = model.stem[0]
     model.stem[0] = nn.Conv3d(
         in_channels,
