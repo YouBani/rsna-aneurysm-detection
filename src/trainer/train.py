@@ -6,16 +6,11 @@ import torch.nn as nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torch.amp import GradScaler
-from torchmetrics import MetricCollection
-from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
 
-from src.data import build_loaders
-from src.models.model import build_3d_model
 from src.trainer.loops import train_one_epoch, validate
 from src.trainer.utils import (
     build_binary_metrics,
     seed_all,
-    pos_weight_from_jsonl,
     save_checkpoint,
 )
 
@@ -30,7 +25,9 @@ def train(
     epochs: int,
     seed: int,
     checkpoint_dir: str,
-    scaler: Optional[GradScaler]=None,
+    scaler: Optional[GradScaler] = None,
+    accum_steps: int = 1,
+    amp_enabled: bool = True,
     amp_dtype: torch.dtype = torch.float16,
     empty_cache_every: int = 50,
 ) -> dict[str, Any]:
@@ -47,6 +44,11 @@ def train(
     best_auroc = float("-inf")
 
     for epoch in range(1, epochs + 1):
+        if hasattr(train_loader, "sampler") and hasattr(
+            train_loader.sampler, "generator"
+        ):
+            train_loader.sampler.generator.manual_seed(seed + epoch)
+
         train_out = train_one_epoch(
             model=model,
             loader=train_loader,
@@ -56,6 +58,8 @@ def train(
             epoch=epoch,
             device=device,
             scaler=scaler,
+            accum_steps=accum_steps,
+            amp_enabled=amp_enabled,
             amp_dtype=amp_dtype,
             empty_cache_every=empty_cache_every,
         )
@@ -71,20 +75,23 @@ def train(
             metrics=val_metrics,
             epoch=epoch,
             device=device,
-            amp=(scaler is not None),
+            amp_enabled=amp_enabled,
             amp_dtype=amp_dtype,
             empty_cache_every=empty_cache_every,
         )
 
+        t_loss = train_out.get("train/loss", float("nan"))
         t_acc = train_out.get("train/acc", float("nan"))
         t_auc = train_out.get("train/auroc", float("nan"))
-        v_acc = train_out.get("val/acc", float("nan"))
-        v_auc = train_out.get("val/auroc", float("nan"))
+
+        v_loss = val_out.get("val/loss", float("nan"))
+        v_acc = val_out.get("val/acc", float("nan"))
+        v_auc = val_out.get("val/auroc", float("nan"))
 
         print(
             f"Epoch {epoch}/{epochs} | "
-            f"train: loss={train_out['train/loss']:.4f}, acc={t_acc:.4f}, auroc={t_auc:.4f} | "
-            f"val:   loss={val_out['val/loss']:.4f}, acc={v_acc:.4f}, auroc={v_auc:.4f}"
+            f"train: loss={t_loss:.4f}, acc={t_acc:.4f}, auroc={t_auc:.4f} | "
+            f"val:   loss={v_loss:.4f}, acc={v_acc:.4f}, auroc={v_auc:.4f}"
         )
 
         save_checkpoint(
