@@ -108,7 +108,7 @@ def main():
         accum_steps=args.accum_steps,
         amp_enabled=amp_enabled,
         amp_dtype=amp_dtype,
-        empty_cache_every=50,
+        empty_cache_every=args.empty_cache_every,
     )
 
     print(summary)
