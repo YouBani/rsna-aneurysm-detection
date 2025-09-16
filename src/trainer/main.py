@@ -1,12 +1,13 @@
 import argparse
 from pathlib import Path
+import wandb
 
 import torch
-from torch.amp import GradScaler
+from torch.amp.grad_scaler import GradScaler
 from src.data import build_loaders
 from src.models.model import build_3d_model
 from src.trainer.train import train
-from src.trainer.utils import seed_all, pos_weight_from_jsonl
+from src.trainer.utils import seed_all
 
 
 def parse_args():
@@ -41,14 +42,42 @@ def parse_args():
         "--accum_steps",
         type=int,
         default=1,
-        help="Number of steps to accumulate gradients before updating weights.",
+        help="Number of steps to accumulate gradients before updating weights",
     )
+    p.add_argument(
+        "--wandb",
+        default="off",
+        choices=["off", "online", "offline"],
+        help="Weights & Biases logging mode",
+    )
+    p.add_argument("--run_name", default=None, help="Optional W&B run name")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
     seed_all(args.seed)
+
+    cfg = dict(
+        model="r3d_18",
+        use_groupnorm=True,
+        precision=args.precision,
+        bs=args.bs,
+        accum_steps=args.accum_steps,
+        lr=args.lr,
+        wd=args.wd,
+        target_slices=args.target_slices,
+        weighted_sampling=True,
+    )
+
+    run = None
+    if args.wandb != "off":
+        run = wandb.init(
+            project="rsna-aneurysm",
+            mode=args.wandb,
+            name=args.run_name,
+            config=cfg,
+        )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     Path(args.out).mkdir(parents=True, exist_ok=True)
@@ -66,13 +95,13 @@ def main():
     )
 
     # Model
-    model = build_3d_model(in_channels=1, num_classes=1, checkpointing=args.ckpt).to(
-        device
-    )
+    model = build_3d_model(
+        in_channels=1, num_classes=1, checkpointing=args.ckpt, use_groupnorm=False
+    ).to(device)
 
     # Loss (class imbalance from TRAIN jsonl)
-    pos_w = pos_weight_from_jsonl(args.train).to(device)
-    loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
+    # pos_w = pos_weight_from_jsonl(args.train).to(device)
+    loss_fn = torch.nn.BCEWithLogitsLoss()
 
     # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
@@ -109,9 +138,11 @@ def main():
         amp_enabled=amp_enabled,
         amp_dtype=amp_dtype,
         empty_cache_every=args.empty_cache_every,
+        logger=run,
     )
 
     print(summary)
+    run.finish()
 
 
 if __name__ == "__main__":
