@@ -34,34 +34,11 @@ class CheckpointedSeq(nn.Module):
         return checkpoint_sequential(self.seq, len(self.seq), x, use_reentrant=False)
 
 
-class MultiHead(nn.Module):
-    """
-    Outputs: {"presence": (B,), "locations": (B, K)}
-    """
-
-    def __init__(self, in_features: int, num_locations: int):
-        super().__init__()
-        self.presence = nn.Linear(in_features, 1)
-        self.num_locations = int(num_locations)
-        self.locations = (
-            nn.Linear(in_features, self.num_locations)
-            if self.num_locations > 0
-            else None
-        )
-
-    def forward(self, x):
-        out = {"presence": self.presence(x).squeeze(1)}
-        if self.locations is not None:
-            out["locations"] = self.locations(x)
-        return out
-
-
 def build_3d_model(
     in_channels: int = 1,
-    num_classes: int = 1,
+    num_outputs: int = 14,
     checkpointing: bool = False,
     use_groupnorm: bool = False,
-    num_locations: int = 0,
 ) -> nn.Module:
     """
     3D ResNet-18 baseline for (C, Z, H, W) inputs.
@@ -83,12 +60,9 @@ def build_3d_model(
         padding=old.padding,
         bias=False,
     )
-    # Replace the classifier with a single logit head
+
     in_feats = model.fc.in_features
-    if num_locations > 0:
-        model.fc = MultiHead(in_feats, num_locations)  # type: ignore
-    else:
-        model.fc = nn.Linear(in_feats, num_classes)
+    model.fc = nn.Linear(in_feats, num_outputs)  # type: ignore
 
     if checkpointing:
         print("Gradient checkpointing enabled for ResNet layers.")
