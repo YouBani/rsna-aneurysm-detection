@@ -2,7 +2,7 @@ import os
 import random
 import json
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Mapping
 
 import torch
 import numpy as np
@@ -12,6 +12,8 @@ from torchmetrics.classification import (
     BinaryAUROC,
     BinaryAveragePrecision,
 )
+
+from src.constants.rsna import JSONL_LABEL_KEYS
 
 
 def seed_all(seed: int = 42):
@@ -29,12 +31,26 @@ def pos_weight_from_jsonl(jsonl_path: str) -> torch.Tensor:
     The formula is neg_count / pos_count.
     """
     labels = [
-        int(json.loads(l)["label"]) for l in Path(jsonl_path).read_text().splitlines()
+        int(json.loads(line)["label"])
+        for line in Path(jsonl_path).read_text().splitlines()
     ]
     pos = sum(labels)
     neg = len(labels) - pos
     weight = neg / max(pos, 1)
     return torch.tensor([weight], dtype=torch.float32)
+
+
+def pos_weight_from_jsonl_multilabel(jsonl_path: str) -> torch.Tensor:
+    pos = torch.zeros(len(JSONL_LABEL_KEYS), dtype=torch.float64)
+    total = 0
+    for line in Path(jsonl_path).read_text().splitlines():
+        row = json.loads(line)
+        for i, k in enumerate(JSONL_LABEL_KEYS):
+            pos[i] += float(row[k])
+        total += 1
+    neg = total - pos
+    w = neg / torch.clamp(pos, min=1.0)
+    return w.to(dtype=torch.float32)
 
 
 def build_binary_metrics():
@@ -49,17 +65,21 @@ def build_binary_metrics():
 
 def save_checkpoint(
     path: Path,
-    model_state: dict,
-    optimizer_state: dict,
+    model_state: Mapping[str, Any],
+    optimizer_state: Optional[Mapping[str, Any]] = None,
+    scheduler_state: Optional[Mapping[str, Any]] = None,
     epoch: Optional[int] = None,
 ) -> None:
     dest = Path(path)
 
-    payload = {"model": model_state}
+    payload: dict[str, Any] = {}
+    payload["model"] = model_state
     if optimizer_state:
         payload["optimizer"] = optimizer_state
+    if scheduler_state:
+        payload["scheduler"] = scheduler_state
     if epoch is not None:
-        payload["epoch"] = epoch
+        payload["epoch"] = int(epoch)
 
     tmp = (
         dest.with_suffix(dest.suffix + ".tmp")
