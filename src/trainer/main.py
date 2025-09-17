@@ -3,11 +3,13 @@ from pathlib import Path
 import wandb
 
 import torch
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.amp.grad_scaler import GradScaler
 from src.data import build_loaders
 from src.models.model import build_3d_model
 from src.trainer.train import train
-from src.trainer.utils import seed_all
+from src.trainer.utils import seed_all, pos_weight_from_jsonl_multilabel
+from src.constants.rsna import K
 
 
 def parse_args():
@@ -60,14 +62,14 @@ def main():
 
     cfg = dict(
         model="r3d_18",
-        use_groupnorm=True,
+        use_groupnorm=False,
         precision=args.precision,
         bs=args.bs,
         accum_steps=args.accum_steps,
         lr=args.lr,
         wd=args.wd,
         target_slices=args.target_slices,
-        weighted_sampling=True,
+        weighted_sampling=False,
     )
 
     run = None
@@ -91,20 +93,30 @@ def main():
         cache_dir=args.cache,
         target_slices=args.target_slices,
         seed=args.seed,
-        weighted_sampling=True,
+        weighted_sampling=False,
     )
 
     # Model
     model = build_3d_model(
-        in_channels=1, num_classes=1, checkpointing=args.ckpt, use_groupnorm=False
+        in_channels=1, num_outputs=K, checkpointing=args.ckpt, use_groupnorm=False
     ).to(device)
 
     # Loss (class imbalance from TRAIN jsonl)
-    # pos_w = pos_weight_from_jsonl(args.train).to(device)
-    loss_fn = torch.nn.BCEWithLogitsLoss()
+    pos_w = pos_weight_from_jsonl_multilabel(args.train).to(device)
+    pos_w = pos_w.clamp_(1.0, 10.0)
+    loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
 
     # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode="max",
+        factor=0.5,
+        patience=2,
+        threshold=1e-4,
+        cooldown=0,
+        min_lr=1e-6,
+    )
 
     if args.precision == "bf16":
         amp_enabled = True
@@ -139,10 +151,12 @@ def main():
         amp_dtype=amp_dtype,
         empty_cache_every=args.empty_cache_every,
         logger=run,
+        scheduler=scheduler,
     )
 
     print(summary)
-    run.finish()
+    if run is not None:
+        run.finish()
 
 
 if __name__ == "__main__":
