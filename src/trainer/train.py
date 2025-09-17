@@ -1,4 +1,5 @@
 import time
+import math
 from pathlib import Path
 from typing import Optional, Any
 
@@ -7,6 +8,7 @@ import torch.nn as nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torch.amp.grad_scaler import GradScaler
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from src.trainer.loops import train_one_epoch, validate
 from src.trainer.utils import (
@@ -36,6 +38,7 @@ def train(
     amp_dtype: torch.dtype = torch.float16,
     empty_cache_every: int = 50,
     logger: Optional[Any] = None,
+    scheduler: Optional[ReduceLROnPlateau] = None,
 ) -> dict[str, Any]:
     seed_all(seed)
 
@@ -43,17 +46,17 @@ def train(
     train_metrics = base.clone()
     val_metrics = base.clone()
 
-    checkpoint_dir = Path(checkpoint_dir)
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    best_path = checkpoint_dir / "best_model.pth"
-    last_path = checkpoint_dir / "last_model.pth"
-    best_auroc = float("-inf")
+    checkpoint_dir_path = Path(checkpoint_dir)
+    checkpoint_dir_path.mkdir(parents=True, exist_ok=True)
+    best_path = checkpoint_dir_path / "best_model.pth"
+    last_path = checkpoint_dir_path / "last_model.pth"
+    best_final = float("-inf")
 
     for epoch in range(1, epochs + 1):
         if hasattr(train_loader, "sampler") and hasattr(
             train_loader.sampler, "generator"
         ):
-            train_loader.sampler.generator.manual_seed(seed + epoch)
+            train_loader.sampler.generator.manual_seed(seed + epoch)  # type: ignore
 
         cuda_reset_peaks(device)
         t0 = time.perf_counter()
@@ -118,7 +121,14 @@ def train(
 
         v_loss = val_out.get("val/loss", float("nan"))
         v_acc = val_out.get("val/acc", float("nan"))
-        v_auc = val_out.get("val/auroc", float("nan"))
+        v_auc_p = val_out.get("val/auc_present", float("nan"))
+        v_final = val_out.get("val/final_auc_weighted", float("nan"))
+        v_locavg = val_out.get("val/auc_locations_mean", float("nan"))
+
+        if scheduler is not None:
+            scheduler.step(v_final)
+
+        current_lr = optimizer.param_groups[0]["lr"]
 
         log_metrics(
             logger,
@@ -128,8 +138,10 @@ def train(
                 "train/auroc": t_auc,
                 "val/loss": v_loss,
                 "val/acc": v_acc,
-                "val/auroc": v_auc,
-                "lr": optimizer.param_groups[0]["lr"],
+                "val/auc_present": v_auc_p,
+                "val/auc_locations_mean": v_locavg,
+                "val/final_auc_weighted": v_final,
+                "lr": current_lr,
                 "epoch": epoch,
             },
             step=epoch,
@@ -138,30 +150,32 @@ def train(
         print(
             f"Epoch {epoch}/{epochs} | "
             f"train: loss={t_loss:.4f}, acc={t_acc:.4f}, auroc={t_auc:.4f} | "
-            f"val:   loss={v_loss:.4f}, acc={v_acc:.4f}, auroc={v_auc:.4f}"
+            f"val:   loss={v_loss:.4f}, acc={v_acc:.4f}, auc_present={v_auc_p:.4f}, final={v_final:.4f}"
         )
 
         save_checkpoint(
             last_path,
-            model.state_dict(),
-            optimizer.state_dict(),
+            model_state=model.state_dict(),
+            optimizer_state=optimizer.state_dict(),
+            scheduler_state=(scheduler.state_dict() if scheduler else None),
             epoch=epoch,
         )
-        current_auroc = val_out["val/auroc"]
-        if current_auroc > best_auroc:
-            best_auroc = current_auroc
+        
+        if not math.isnan(v_final) and v_final > best_final:
+            best_final = v_final
             save_checkpoint(
                 best_path,
-                model.state_dict(),
-                optimizer.state_dict(),
+                model_state=model.state_dict(),
+                optimizer_state=optimizer.state_dict(),
+                scheduler_state=(scheduler.state_dict() if scheduler else None),
                 epoch=epoch,
             )
-            print(f"New best AUROC={best_auroc:.4f} - saved {best_auroc}")
-            log_metrics(logger, {"checkpoint/best_auroc": best_auroc}, step=epoch)
+            print(f"New best FINAL={best_final:.4f} - saved {best_final}")
+            log_metrics(logger, {"checkpoint/best_final_auc": best_final}, step=epoch)
 
     return {
-        "auroc": val_out["val/auroc"],
-        "ap": val_out["val/ap"],
+        "final_auc_weighted": val_out.get("val/final_auc_weighted", float("nan")),
+        "auc_present": val_out.get("val/auc_present", float("nan")),
         "best_model_path": best_path,
         "last_model_path": last_path,
     }
