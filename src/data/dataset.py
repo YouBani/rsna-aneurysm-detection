@@ -7,6 +7,8 @@ from .utils import safe_float, load_series_auto
 
 from typing import Optional
 
+from src.constants.rsna import JSONL_LABEL_KEYS, PRESENT_IDX
+
 
 class RSNADataset(Dataset):
     """
@@ -17,10 +19,10 @@ class RSNADataset(Dataset):
         "id":      str (SeriesInstanceUID),
         "image":   FloatTensor (1, Z, H, W) in [0,1],
         "label":   FloatTensor (),  # 0.0 / 1.0
+        "labels14":  FloatTensor (14,),
         "age":     FloatTensor (),  # years, -1.0 if unknown
         "sex":     FloatTensor (),  # {M:0, F:1, unknown:-1}
         "weight":  FloatTensor ()   # kg, -1.0 if unknown
-
       }
     """
 
@@ -31,11 +33,13 @@ class RSNADataset(Dataset):
         cache_dir: Optional[str] = None,
         transform=None,
     ):
-        self.rows = [json.loads(l) for l in Path(jsonl_path).read_text().splitlines()]
+        self.rows = [
+            json.loads(line) for line in Path(jsonl_path).read_text().splitlines()
+        ]
         self.target_slices = target_slices
         self.cache = Path(cache_dir) if cache_dir else None
         self.transform = transform
-        if cache_dir:
+        if self.cache:
             self.cache.mkdir(parents=True, exist_ok=True)
 
     def __len__(self):
@@ -51,6 +55,16 @@ class RSNADataset(Dataset):
         if v == "FEMALE":
             return 1.0
         return -1.0
+
+    @staticmethod
+    def _labels14_from_row(row: dict) -> Optional[torch.Tensor]:
+        vals = []
+        try:
+            for key in JSONL_LABEL_KEYS:
+                vals.append(float(row[key]))
+        except KeyError:
+            return None
+        return torch.tensor(vals, dtype=torch.float32)
 
     def __getitem__(self, idx: int):
         row = self.rows[idx]
@@ -90,11 +104,18 @@ class RSNADataset(Dataset):
         if self.transform:
             x = self.transform(x)
 
-        return {
+        out = {
             "id": series_uid,
             "image": x,
-            "label": torch.tensor(float(row["label"]), dtype=torch.float32),
+            "label": torch.tensor(float(row.get("label", 0.0)), dtype=torch.float32),
             "age": torch.tensor(age, dtype=torch.float32),
             "sex": torch.tensor(sex, dtype=torch.float32),
             "weight": torch.tensor(weight, dtype=torch.float32),
         }
+
+        labels14 = self._labels14_from_row(row)
+        if labels14 is not None:
+            out["labels14"] = labels14
+            out["label"] = labels14[PRESENT_IDX]
+
+        return out
