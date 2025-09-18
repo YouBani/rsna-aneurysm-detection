@@ -53,6 +53,30 @@ def parse_args():
         help="Weights & Biases logging mode",
     )
     p.add_argument("--run_name", default=None, help="Optional W&B run name")
+    p.add_argument(
+        "--act-hook", action="store_true", help="Enable activation monitoring hooks"
+    )
+    p.add_argument(
+        "--act-layers",
+        type=str,
+        default="stem,layer1,layer2,layer3,layer4",
+        help="Comma-separated module names to hook",
+    )
+    p.add_argument(
+        "--act-sample-per-call",
+        type=int,
+        default=256,
+        help="Number of activation values to sample per hook call",
+    )
+    p.add_argument(
+        "--act-every-n", type=int, default=5, help="Collect from every Nth forward pass"
+    )
+    p.add_argument(
+        "--act-hist-every",
+        type=int,
+        default=2,
+        help="Log activation histograms every K epochs (0 to disable)",
+    )
     return p.parse_args()
 
 
@@ -152,6 +176,11 @@ def main():
         empty_cache_every=args.empty_cache_every,
         logger=run,
         scheduler=scheduler,
+        act_hook=args.act_hook,
+        act_layers=tuple(s.strip() for s in args.act_layers.split(",") if s.strip()),
+        act_sample_per_call=args.act_sample_per_call,
+        act_every_n=args.act_every_n,
+        act_hist_every=args.act_hist_every,
     )
 
     print(summary)
