@@ -154,10 +154,17 @@ def train(
                         import wandb
 
                         wb_hists = {}
+                        pct = {}
+                        qs = [50, 90, 99]
                         for k, v in act_hists.items():
                             arr = np.asarray(v, dtype=float).reshape(-1)
-                            wb_hists[k] = wandb.Histogram(arr.tolist())
-                        log_metrics(logger, wb_hists, step=epoch)
+                            wb_hists[f"hists/{k}"] = wandb.Histogram(arr.tolist())
+
+                            p = np.percentile(arr, qs)
+                            for q, v in zip(qs, p):
+                                pct[f"debug/act_pct/{k}/p{q}"] = float(v)
+
+                        log_metrics(logger, {**wb_hists, **pct}, step=epoch)
                     except Exception:
                         hist_summary = {}
                         qs = [0, 1, 25, 50, 75, 90, 100]

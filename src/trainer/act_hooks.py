@@ -55,16 +55,17 @@ class ActivationHook:
         x = t.detach()
         if not torch.is_tensor(x) or x.numel() == 0:
             return {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0, "sparsity": 0.0}
-        if x.is_floating_point() and x.dtype != torch.float32:
-            x = x.float()
-        if not torch.isfinite(x).all():
-            x = torch.nan_to_num(x, nan=0.0, posinf=1e6, neginf=-1e6)
+
+        mean = torch.mean(x, dtype=torch.float32).item()
+        std = x.std(unbiased=False).item()
+        vmin = x.amin().item()
+        vmax = x.amax().item()
+
         return {
-            "mean": x.mean().item(),
-            "std": x.std(unbiased=False).item(),
-            "min": x.amin().item(),
-            "max": x.amax().item(),
-            "sparsity": (x == 0).float().mean().item(),
+            "mean": mean,
+            "std": std,
+            "min": vmin,
+            "max": vmax,
         }
 
     def _hook_fn(self, name, module: nn.Module, inp: Any, out: Any):
@@ -83,14 +84,18 @@ class ActivationHook:
             self.stats[name][stat_name] += value
         self.counts[name] += 1
 
-        act_vec = act.detach()
-        if act_vec.is_floating_point() and act_vec.dtype != torch.float32:
-            act_vec = act_vec.float()
-        act_vec = act.reshape(-1)
-        if act_vec.numel():
-            take = min(self.sample_per_call, act_vec.numel())
-            idx = torch.randint(0, act_vec.numel(), (take,), device=act_vec.device)
-            self.samples[name].extend(act_vec[idx].cpu().numpy().tolist())
+        with torch.no_grad():
+            act_vec = act.detach().reshape(-1)
+            n = act_vec.numel()
+            if n:
+                take = min(self.sample_per_call, n)
+                idx = torch.randint(0, n, (take,), device=act_vec.device)
+                sample = act_vec.index_select(0, idx)
+                sp = (sample == 0).float().mean().item()
+                self.stats[name]["sparsity"] += sp
+                self.samples[name].extend(
+                    sample.to(torch.float32).cpu().numpy().tolist()
+                )
 
     def summarize_means(self, prefix="debug/act") -> dict[str, float]:
         """Averages the collected stats and resets them for the next use."""
