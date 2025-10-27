@@ -33,7 +33,7 @@ The dataset originates from the **RSNA Intracranial Aneurysm Detection Challenge
 
 ## 3. Technical Pipeline
 
-### 4.1 Data Preprocessing
+### 3.1 Data Preprocessing
 Implemented in `src/data/preprocess.py`, the offline preprocessing pipeline:
 - Reads **DICOM headers** and infers scan subtype (`CT/CTA/MRA/T1post/T2`)
 - Converts pixel data to **Hounsfield Units** for CT
@@ -45,7 +45,7 @@ This offline conversion eliminates runtime I/O overhead and minimizes RAM usage 
 
 ---
 
-### 4.2 Dataset Manifest
+### 3.2 Dataset Manifest
 `build_manifest.py` consolidates patient metadata, file paths, modality, subtype, and 14 binary labels into a single `.jsonl` manifest:
 ```json
 {
@@ -64,7 +64,9 @@ This offline conversion eliminates runtime I/O overhead and minimizes RAM usage 
 }
 ```
 
-### 4.3 Dataset & Loader
+---
+
+### 3.3 Dataset & Loader
 
 `RSNADataset` (in `dataset.py`):
 
@@ -85,7 +87,9 @@ This offline conversion eliminates runtime I/O overhead and minimizes RAM usage 
 
 `data.py` wraps this into PyTorch `DataLoader` objects with optional weighted sampling for class imbalance and deterministic seeding.
 
-### 4.4 Model Architecture
+---
+
+### 3.4 Model Architecture
 
 Implemented in `src/models/model.py`:
 
@@ -107,6 +111,9 @@ model = build_3d_model(
     checkpointing=True,
     use_groupnorm=True
 )
+
+---
+
 
 ```
 ## Project Structure
