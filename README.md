@@ -111,12 +111,40 @@ model = build_3d_model(
     checkpointing=True,
     use_groupnorm=True
 )
+```
+
+---
+
+### 3.5 Training Loop
+
+`src/trainer/` contains the modular training framework:
+
+* `loops.py` — Defines train_one_epoch and validate loops
+* `train.py` — High-level orchestration (metrics, LR scheduling, checkpoints)
+* `main.py` — CLI entrypoint with full argument control
+
+**Features:**
+
+* Automatic LR scheduling (`ReduceLROnPlateau`)
+* Mixed precision (AMP) + Gradient Scaling
+* Weighted BCEWithLogitsLoss with per-label class weights
+* Activation statistics & histograms (mean/std/sparsity) via hooks
+* Weights & Biases logging for metrics and activations
+
+---
+
+### 3.6 Metrics
+
+Defined in `src/metrics/rsna.py`:
+
+* MultilabelAUROC (per-label AUC)
+* Custom weighted AUC giving higher weight to “Aneurysm Present” label
+* Additional binary metrics via TorchMetrics (Accuracy, AveragePrecision)
 
 ---
 
 
-```
-## Project Structure
+## 4. Project Structure
 ```
 rsna-aneurysm-detection/
 └── src/
