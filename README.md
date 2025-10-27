@@ -14,6 +14,7 @@ The main goal was to build an end-to-end 3D convolutional pipeline capable of ha
 * Gradient checkpointing and offline preprocessing to reduce memory bottlenecks
 
 ## Project Structure
+```
 rsna-aneurysm-detection/
 └── src/
     ├── constants/
@@ -40,3 +41,4 @@ rsna-aneurysm-detection/
         ├── train.py                      # high-level training orchestration + checkpoints
         └── utils.py                      # seeding, pos_weight calc, metrics, CUDA helpers
 
+```
