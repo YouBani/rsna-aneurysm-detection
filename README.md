@@ -33,7 +33,7 @@ The dataset originates from the **RSNA Intracranial Aneurysm Detection Challenge
 
 ## 3. Technical Pipeline
 
-### 🧮 4.1 Data Preprocessing
+### 4.1 Data Preprocessing
 Implemented in `src/data/preprocess.py`, the offline preprocessing pipeline:
 - Reads **DICOM headers** and infers scan subtype (`CT/CTA/MRA/T1post/T2`)
 - Converts pixel data to **Hounsfield Units** for CT
