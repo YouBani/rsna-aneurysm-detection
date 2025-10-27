@@ -66,14 +66,14 @@ This offline conversion eliminates runtime I/O overhead and minimizes RAM usage 
 
 ### 4.3 Dataset & Loader
 
-RSNADataset (in dataset.py):
+`RSNADataset` (in `dataset.py`):
 
-Loads cached .npy volumes
+* Loads cached `.npy` volumes
 
-Normalizes metadata (age, sex, weight)
+* Normalizes metadata (age, sex, weight)
 
-Returns a dictionary for each sample:
-
+* Returns a dictionary for each sample:
+```python
 {
     "image": Tensor (1, Z, H, W),
     "labels14": Tensor (14,),
@@ -81,7 +81,7 @@ Returns a dictionary for each sample:
     "sex": float,
     "weight": float
 }
-
+```
 
 `data.py` wraps this into PyTorch `DataLoader` objects with optional weighted sampling for class imbalance and deterministic seeding.
 
