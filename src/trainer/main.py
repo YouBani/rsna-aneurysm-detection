@@ -3,7 +3,7 @@ from pathlib import Path
 import wandb
 
 import torch
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.amp.grad_scaler import GradScaler
 from src.data import build_loaders
 from src.models.model import build_3d_model
@@ -132,15 +132,7 @@ def main():
 
     # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode="max",
-        factor=0.5,
-        patience=2,
-        threshold=1e-4,
-        cooldown=0,
-        min_lr=1e-6,
-    )
+    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
 
     if args.precision == "bf16":
         amp_enabled = True

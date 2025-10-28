@@ -185,7 +185,7 @@ def train(
             v_locavg = val_out.get("val/auc_locations_mean", float("nan"))
 
             if scheduler is not None:
-                scheduler.step(v_final)
+                scheduler.step()
 
             current_lr = optimizer.param_groups[0]["lr"]
 
