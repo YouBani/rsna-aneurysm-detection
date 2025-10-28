@@ -43,6 +43,8 @@ def train(
     empty_cache_every: int = 50,
     logger: Optional[Any] = None,
     scheduler: Optional[ReduceLROnPlateau] = None,
+    warmup_epochs: int = 1,
+    base_lr: int = 1e-4,
     act_hook: bool = False,
     act_layers: tuple[str, ...] = ("stem", "layer1", "layer2", "layer3", "layer4"),
     act_sample_per_call: int = 256,
@@ -73,6 +75,15 @@ def train(
     ctx = ah if (act_hook and ah is not None) else nullcontext()
     with ctx:
         for epoch in range(1, epochs + 1):
+            # Warmup for the first warmup_epochs, then cosine scheduler
+            if epoch <= warmup_epochs:
+                scale = epoch / max(1, warmup_epochs)
+                for pg in optimizer.param_groups:
+                    pg["lr"] = base_lr * scale
+            else:
+                if scheduler is not None:
+                    scheduler.step()
+
             if hasattr(train_loader, "sampler") and hasattr(
                 train_loader.sampler, "generator"
             ):
@@ -183,9 +194,6 @@ def train(
             v_auc_p = val_out.get("val/auc_present", float("nan"))
             v_final = val_out.get("val/final_auc_weighted", float("nan"))
             v_locavg = val_out.get("val/auc_locations_mean", float("nan"))
-
-            if scheduler is not None:
-                scheduler.step()
 
             current_lr = optimizer.param_groups[0]["lr"]
 

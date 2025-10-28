@@ -77,6 +77,12 @@ def parse_args():
         default=2,
         help="Log activation histograms every K epochs (0 to disable)",
     )
+    p.add_argument(
+        "--warmup-epochs",
+        default=1,
+        help="Linear LR warmup length before cosine anneal",
+    )
+
     return p.parse_args()
 
 
@@ -120,19 +126,18 @@ def main():
         weighted_sampling=False,
     )
 
-    # Model
     model = build_3d_model(
         in_channels=1, num_outputs=K, checkpointing=args.ckpt, use_groupnorm=False
     ).to(device)
 
-    # Loss (class imbalance from TRAIN jsonl)
     pos_w = pos_weight_from_jsonl_multilabel(args.train).to(device)
     pos_w = pos_w.clamp_(1.0, 10.0)
     loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
 
-    # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
+
+    t_max = max(1, args.epochs - args.warmup_epochs)
+    scheduler = CosineAnnealingLR(optimizer, T_max=t_max, eta_min=1e-6)
 
     if args.precision == "bf16":
         amp_enabled = True
@@ -168,6 +173,8 @@ def main():
         empty_cache_every=args.empty_cache_every,
         logger=run,
         scheduler=scheduler,
+        warmup_epochs=args.warmup_epochs,
+        base_lr=args.lr,
         act_hook=args.act_hook,
         act_layers=tuple(s.strip() for s in args.act_layers.split(",") if s.strip()),
         act_sample_per_call=args.act_sample_per_call,
