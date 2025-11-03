@@ -1,12 +1,9 @@
 import torch
-import json
 import numpy as np
 from pathlib import Path
 from torch.utils.data import Dataset
-from .utils import safe_float, load_series_auto
-
-from typing import Optional
-
+from typing import Optional, Any
+from .utils import safe_float
 from src.constants.rsna import JSONL_LABEL_KEYS, PRESENT_IDX
 
 
@@ -16,31 +13,27 @@ class RSNADataset(Dataset):
 
     Returns a dictionary for each sample:
       {
-        "id":      str (SeriesInstanceUID),
-        "image":   FloatTensor (1, Z, H, W) in [0,1],
-        "label":   FloatTensor (),  # 0.0 / 1.0
+        "id":        str (SeriesInstanceUID),
+        "image":     FloatTensor (1, Z, H, W) in [0,1],
+        "label":     FloatTensor (),  # 0.0 / 1.0
         "labels14":  FloatTensor (14,),
-        "age":     FloatTensor (),  # years, -1.0 if unknown
-        "sex":     FloatTensor (),  # {M:0, F:1, unknown:-1}
-        "weight":  FloatTensor ()   # kg, -1.0 if unknown
+        "age":       FloatTensor (),  # years, -1.0 if unknown
+        "sex":       FloatTensor (),  # {M:0, F:1, unknown:-1}
+        "weight":    FloatTensor ()   # kg, -1.0 if unknown
+        "bbox":      FloatTensor (4,) # (y0, y1, x0, x1)
+        "z_pos":     FloatTensor (Z,) # Physical Z positions
       }
     """
 
     def __init__(
         self,
-        jsonl_path: str,
-        target_slices=125,
-        cache_dir: Optional[str] = None,
+        preprocessed_dir: Path,
+        manifest_rows: list[dict[str, Any]],
         transform=None,
     ):
-        self.rows = [
-            json.loads(line) for line in Path(jsonl_path).read_text().splitlines()
-        ]
-        self.target_slices = target_slices
-        self.cache = Path(cache_dir) if cache_dir else None
+        self.preprocessed_dir = preprocessed_dir
+        self.rows = manifest_rows
         self.transform = transform
-        if self.cache:
-            self.cache.mkdir(parents=True, exist_ok=True)
 
     def __len__(self):
         return len(self.rows)
@@ -69,38 +62,25 @@ class RSNADataset(Dataset):
     def __getitem__(self, idx: int):
         row = self.rows[idx]
         series_uid = row["id"]
-        image_path = Path(row["image_path"])
 
-        vol = None
-        cache_path = self.cache / f"{series_uid}.npy" if self.cache else None
+        npz_path = self.preprocessed_dir / f"{series_uid}.npz"
 
-        if cache_path and cache_path.exists():
-            try:
-                vol = np.load(cache_path)
-            except Exception as e:
-                print(f"[WARN]: Failed to load cached file {cache_path}: {e}")
-                vol = None
-
-        if vol is None:
-            vol = load_series_auto(
-                str(image_path),
-                subtype=row["subtype"],
-                target_slices=self.target_slices,
-            )
-
-            if not isinstance(vol, np.ndarray):
-                raise TypeError(
-                    f"load_series_auto must return np.ndarray, got {type(vol)} for {series_uid}"
-                )
-
-            if cache_path:
-                np.save(cache_path, vol)
+        try:
+            with np.load(npz_path) as data:
+                vol = data["vol"].astype(np.float32)
+                bbox = data.get("bbox", np.array([-1, -1, -1, -1]))
+                z_pos = data.get("z_pos", np.array([]))
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Missing preprocessed file: {npz_path}")
+        except Exception as e:
+            raise IOError(f"Failed to load {npz_path}: {e}")
 
         sex = self._parse_sex(row.get("patient_sex"))
         age = safe_float(row.get("patient_age"), -1.0)
         weight = safe_float(row.get("patient_weight"), -1.0)
 
         x = torch.from_numpy(vol).unsqueeze(0).float()
+
         if self.transform:
             x = self.transform(x)
 
@@ -111,6 +91,8 @@ class RSNADataset(Dataset):
             "age": torch.tensor(age, dtype=torch.float32),
             "sex": torch.tensor(sex, dtype=torch.float32),
             "weight": torch.tensor(weight, dtype=torch.float32),
+            "bbox": torch.from_numpy(bbox).int(),
+            "z_pos": torch.from_numpy(z_pos).float(),
         }
 
         labels14 = self._labels14_from_row(row)
