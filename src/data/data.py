@@ -1,11 +1,10 @@
 import json
 import random
-from typing import Optional
-
+from typing import Any
+from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, WeightedRandomSampler
-
 from src.data.dataset import RSNADataset
 
 __all__ = ["build_loaders"]
@@ -17,31 +16,33 @@ def _seed_worker(_worker_id):
     random.seed(worker_seed)
 
 
-def _labels_from_jsonl(jsonl_path: str) -> list[int]:
+def _load_jsonl_rows(jsonl_path: str) -> list[dict[str, Any]]:
+    """Loads the rows from a .jsonl file."""
     with open(jsonl_path) as f:
-        return [int(json.loads(line)["label"]) for line in f]
+        return [json.loads(line) for line in f]
 
 
 def build_loaders(
     train_jsonl: str,
     val_jsonl: str,
+    preprocessed_dir: str,
     *,
     batch_size: int = 2,
     num_workers: int = 4,
-    cache_dir: Optional[str] = None,
-    target_slices: int = 128,
     seed: int = 42,
     weighted_sampling: bool = True,
     pin_memory: bool = True,
 ) -> tuple[DataLoader, DataLoader, RSNADataset, RSNADataset]:
     """
-    Build train/val DataLoaders for 3D volumes coming from RSNADataset.
+    Build train/val DataLoaders for preprocessed 3D volumes.
     Returns: train_loader, val_loader, train_ds, val_ds
     """
-    train_ds = RSNADataset(
-        train_jsonl, target_slices=target_slices, cache_dir=cache_dir
-    )
-    val_ds = RSNADataset(val_jsonl, target_slices=target_slices, cache_dir=cache_dir)
+    train_rows = _load_jsonl_rows(train_jsonl)
+    val_rows = _load_jsonl_rows(val_jsonl)
+
+    data_root = Path(preprocessed_dir)
+    train_ds = RSNADataset(preprocessed_dir=data_root, manifest_rows=train_rows)
+    val_ds = RSNADataset(preprocessed_dir=data_root, manifest_rows=val_rows)
 
     g = torch.Generator().manual_seed(seed)
 
@@ -54,7 +55,7 @@ def build_loaders(
     sampler = None
     shuffle = True
     if weighted_sampling:
-        labels = _labels_from_jsonl(train_jsonl)
+        labels = [int(row["label"]) for row in train_rows]
         pos = sum(labels)
         neg = len(labels) - pos
         weights = {0: 1.0 / max(neg, 1), 1: 1.0 / max(pos, 1)}
