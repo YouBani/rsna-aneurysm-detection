@@ -17,7 +17,8 @@ def _write_jsonl(items: list[dict], path: Path) -> None:
 
 
 def _get_pid(row: dict) -> str:
-    if "patient_id" in row: return str(row["patient_id"])
+    if "patient_id" in row:
+        return str(row["patient_id"])
     raise KeyError("Row is missing patient id.")
 
 
@@ -31,7 +32,7 @@ def _patients_by_label(rows: list[dict]) -> tuple[list[str], list[str]]:
         pid = _get_pid(row)
         lbl = int(row["label"])
         per_patient_pos[pid] = per_patient_pos.get(pid, 0) or lbl
-    
+
     pos_pids = [pid for pid, v in per_patient_pos.items() if v == 1]
     neg_pids = [pid for pid, v in per_patient_pos.items() if v == 0]
     return sorted(pos_pids), sorted(neg_pids)
@@ -63,11 +64,11 @@ def _stratified_group_split(
     test_neg, neg_rem = _take_split(neg_pids[:], n_test_neg, rng)
     test_pos, pos_rem = _take_split(pos_pids[:], n_test_pos, rng)
 
-    val_neg,  neg_rem2 = _take_split(neg_rem, n_val_neg, rng)
-    val_pos,  pos_rem2 = _take_split(pos_rem, n_val_pos, rng)
+    val_neg, neg_rem2 = _take_split(neg_rem, n_val_neg, rng)
+    val_pos, pos_rem2 = _take_split(pos_rem, n_val_pos, rng)
 
     test_p = test_neg | test_pos
-    val_p  = val_neg  | val_pos
+    val_p = val_neg | val_pos
     train_p = set(neg_rem2) | set(pos_rem2)
     return train_p, val_p, test_p
 
@@ -134,7 +135,7 @@ def split_manifest(
         val (float): Fraction of samples to include in the validation set (defaut 0.15).
         test (float): Fraction of samples to include in the test set (defaut 0.15).
         seed (int): Random seed for reproducibility.
-    
+
     Returns:
         A dictionary with the number of samples in each split.
     """
@@ -159,8 +160,10 @@ def split_manifest(
         total_series += len(srows)
         s_cnt = _count_series_by_label(srows)
         p_cnt = _count_patients_by_label(srows)
-        print(f"{name}: series={len(srows)} (neg={s_cnt[0]}, pos={s_cnt[1]}); "
-              f"patients={p_cnt[0]+p_cnt[1]} (negP={p_cnt[0]}, posP={p_cnt[1]})")
+        print(
+            f"{name}: series={len(srows)} (neg={s_cnt[0]}, pos={s_cnt[1]}); "
+            f"patients={p_cnt[0] + p_cnt[1]} (negP={p_cnt[0]}, posP={p_cnt[1]})"
+        )
     print(f"total series: {total_series}")
 
     return {k: len(v) for k, v in splits.items()}
