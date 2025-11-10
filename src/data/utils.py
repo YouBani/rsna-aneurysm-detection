@@ -98,7 +98,7 @@ def window_hu(vol: np.ndarray, center: float, width: float) -> np.ndarray:
 
 
 def apply_voi_or_minmax(ds, arr: np.ndarray) -> np.ndarray:
-    """MR/MRA: apply VOI LUT, if it fails fall back to simple min-max normalization"""
+    """MRA: apply VOI LUT, if it fails fall back to simple min-max normalization"""
     try:
         arr = apply_voi_lut(arr, ds).astype(np.float32)
         a_min, a_max = float(arr.min()), float(arr.max())
@@ -331,6 +331,8 @@ def crop_and_normalize_ct(
     vol_norm = window_hu(vol_crop_hu, center=window_center, width=window_width)
 
     meta = {
+        "h": h,
+        "w": w,
         "bbox": (int(y0), int(y1), int(x0), int(x1)),
         "z_pos": z_pos,
     }
@@ -428,6 +430,8 @@ def crop_and_normalize_mr(
     vol_crop = vol_norm[:, y0:y1, x0:x1]
 
     meta = {
+        "h": h,
+        "w": w,
         "bbox": (int(y0), int(y1), int(x0), int(x1)),
         "z_pos": z_pos,
     }

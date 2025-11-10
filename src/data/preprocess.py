@@ -7,6 +7,7 @@ from multiprocessing import Pool, cpu_count
 from typing import Any, Optional
 import numpy as np
 from tqdm import tqdm
+import nibabel as nib
 from src.data.utils import crop_and_normalize_series, resample_z
 
 
@@ -37,11 +38,25 @@ def _compute_target_z_from_mm(z_pos: np.ndarray, resample_mm: float) -> Optional
     return target_z
 
 
+def _align_mask(mask_raw: np.ndarray, modality: str) -> np.ndarray:
+    """Applies the correct (Transpose + Flip) rule based on the modality
+    to align the NifTI mask with the DICOM volume."""
+    mask_T = np.transpose(mask_raw, (2, 1, 0))
+
+    if modality in {"CT", "CTA"}:
+        mask_aligned = np.flip(mask_T, axis=1)
+    else:
+        mask_aligned = np.flip(mask_T, axis=(1, 2))
+
+    return mask_aligned
+
+
 def _process_one(
     args: tuple[dict[str, Any], Path, Optional[float], Optional[float]],
 ) -> Optional[tuple[str, str]]:
     """
-    Worker: load -> crop/normalize -> (optional) resample to uniform mm -> save .npz + .json.
+    Worker: load/crop/norm vol -> load/align/crop masks
+            -> (optional) resample -> save .npz + .json.
     Returns None on success or (series_id, error_message) on failure.
     """
     row, out_dir, resample_mm_ct, resample_mm_mr = args
@@ -65,19 +80,51 @@ def _process_one(
         return None
 
     try:
-        vol, meta = crop_and_normalize_series(series_dir, modality=modality)
+        vol_cropped, meta = crop_and_normalize_series(series_dir, modality=modality)
         bbox = meta.get("bbox", None)
         z_pos = meta.get("z_pos", None)
 
+        if bbox is None:
+            return series_id, "Missing bbox after volume processing."
+
+        y0, y1, x0, x1 = bbox
+
+        original_h = meta.get("h", -1)
+        original_w = meta.get("w", -1)
+
+        mask_aneurysm_cropped = np.zeros_like(vol_cropped, dtype=np.uint8)
+        mask_cow_cropped = np.zeros_like(vol_cropped, dtype=np.uint8)
+
+        aneurysm_nii_path_str = row.get("segmentation_path")
+
+        if aneurysm_nii_path_str and aneurysm_nii_path_str.lower() != "null":
+            aneurysm_nii_path = Path(aneurysm_nii_path_str)
+
+            cow_nii_path_str = aneurysm_nii_path_str.replace(".nii", "_cowseg.nii")
+            cow_nii_path = Path(cow_nii_path_str)
+
+            if aneurysm_nii_path.exists():
+                mask_raw = nib.load(aneurysm_nii_path).get_fdata(dtype=np.float32)
+                mask_aligned = _align_mask(mask_raw, modality)
+                mask_aneurysm_cropped = mask_aligned[:, y0:y1, x0:x1].astype(np.uint8)
+                if mask_aneurysm_cropped.shape != vol_cropped.shape:
+                    return series_id, f"Aneurysm mask shape mismatch"
+
+            if cow_nii_path.exists():
+                mask_raw = nib.load(cow_nii_path).get_fdata(dtype=np.float32)
+                mask_aligned = _align_mask(mask_raw, modality)
+                mask_cow_cropped = mask_aligned[:, y0:y1, x0:x1].astype(np.uint8)
+                if mask_cow_cropped.shape != vol_cropped.shape:
+                    return series_id, f"CoW mask shape mismatch"
+
         is_ct = modality in {"CT", "CTA"}
-
         resample_mm = resample_mm_ct if is_ct else resample_mm_mr
-
         target_z = None
+
         if (
             resample_mm is not None
             and (z_pos is not None)
-            and len(z_pos) == vol.shape[0]
+            and len(z_pos) == vol_cropped.shape[0]
         ):
             target_z = _compute_target_z_from_mm(
                 np.asarray(z_pos, np.float32),
@@ -85,8 +132,8 @@ def _process_one(
             )
             if target_z is not None:
                 use_antialias = is_ct
-                vol = resample_z(
-                    vol,
+                vol_final = resample_z(
+                    vol_cropped,
                     target_z=target_z,
                     z_pos=np.asarray(z_pos, np.float32),
                     antialiasing=use_antialias,
@@ -97,7 +144,11 @@ def _process_one(
                     z_pos = None
 
         save_dict: dict[str, Any] = {
-            "vol": vol.astype(np.float16),
+            "vol": vol_final.astype(np.float16),
+            "mask": mask_aneurysm_cropped,
+            "cow_mask": mask_cow_cropped,
+            "series_id": np.array(series_id),
+            "modality": np.array(modality),
         }
         if bbox is not None:
             save_dict["bbox"] = np.asarray(bbox, dtype=np.int32)
@@ -109,11 +160,18 @@ def _process_one(
         series_info = {
             "series_id": series_id,
             "modality": modality,
-            "shape_cropped": [int(x) for x in vol.shape],
+            "shape_uncropped": (
+                len(z_pos) if z_pos is not None else -1,
+                original_h,
+                original_w,
+            ),
+            "shape_cropped": [int(x) for x in vol_cropped.shape],
             "bbox": [int(b) for b in bbox] if bbox is not None else None,
             "has_z_pos": bool(z_pos is not None),
             "resampled": bool(target_z is not None),
             "resample_mm": None if resample_mm is None else float(resample_mm),
+            "has_aneurysm_mask": bool(mask_aneurysm_cropped.sum() > 0),
+            "has_cow_mask": bool(mask_cow_cropped.sum() > 0),
         }
         out_json.write_text(json.dumps(series_info, indent=2))
 
