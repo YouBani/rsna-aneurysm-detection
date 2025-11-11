@@ -43,7 +43,13 @@ def _align_mask(mask_raw: np.ndarray, modality: str) -> np.ndarray:
     to align the NifTI mask with the DICOM volume."""
     mask_T = np.transpose(mask_raw, (2, 1, 0))
 
-    if modality in {"CT", "CTA"}:
+    if modality in {
+        "CT",
+        "CTA",
+        "MR",
+        "MRI T1post",
+        "MRI T2",
+    }:
         mask_aligned = np.flip(mask_T, axis=1)
     else:
         mask_aligned = np.flip(mask_T, axis=(1, 2))
