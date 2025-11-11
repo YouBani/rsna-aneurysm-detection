@@ -13,12 +13,6 @@ logging.basicConfig(
 )
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    """Reads a JSONL file and returns a list of dictionaries."""
-    with open(path, "r") as f:
-        return [json.loads(line) for line in f.read().splitlines() if line.strip()]
-
-
 def _process_one_json(json_path: Path) -> Optional[list[dict[str, Any]]]:
     """Reads one .json and returns a list of slice-level entries.
     Returns None if the .json or .npz is missing or invalid."""
@@ -38,17 +32,27 @@ def _process_one_json(json_path: Path) -> Optional[list[dict[str, Any]]]:
             logging.warning(f"Invalid shape in {json_path.name}")
             return None
 
-        has_aneurysm = meta.get("has_aneurysm_mask", False)
-        patient_label = 1 if has_aneurysm else 0
+        patient_label = 1 if meta.get("has_aneurysm_mask", False) else 0
+
+        positive_slice_indices = set()
+        if patient_label == 1:
+            try:
+                with np.load(npz_path, mmap_mode="r") as data:
+                    slice_sums = data["mask"].sum(axis=(1, 2))
+                    positive_slice_indices = set(np.where(slice_sums > 0)[0])
+            except Exception as e:
+                logging.warning(f"Could not load mask for {series_id}: {e}")
 
         slice_entries = []
         for slice_idx in range(num_slices):
+            has_aneurysm = slice_idx in positive_slice_indices
             slice_entries.append(
                 {
                     "series_id": series_id,
                     "npz_path": npz_path,
                     "slice_idx": slice_idx,
                     "patient_label": patient_label,
+                    "slice_has_aneurysm": has_aneurysm,
                 }
             )
         return slice_entries
@@ -105,25 +109,7 @@ def main():
         logging.error("No slice entries were generated. Exiting.")
         return
 
-    logging.info("Checking for slice-level aneurysm labels.")
-
-    def check_slice_label(entry):
-        try:
-            with np.load(entry["npz_path"]) as data:
-                mask_slice = data["mask"][entry["slice_idx"]]
-                entry["slice_has_aneurysm"] = bool(mask_slice.sum() > 0)
-        except Exception:
-            entry["slice_has_aneurysm"] = False
-        return entry
-
-    with Pool(processes=args.num_workers) as pool:
-        all_slice_entries = list(
-            tqdm(
-                pool.imap(check_slice_label, all_slice_entries),
-                total=len(all_slice_entries),
-                desc="Checking slice labels",
-            )
-        )
+    logging.info(f"Total slices found: {len(all_slice_entries)}")
 
     logging.info(f"Saving manifest to {args.out_file}.")
     with open(args.out_file, "w") as f:
