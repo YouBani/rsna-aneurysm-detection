@@ -35,8 +35,14 @@ def main():
 
         all_idx = set(range(num_slices))
         neg_pool = sorted(all_idx - pos_expanded)
-        n_neg = min(len(pos_expanded) * args.neg_per_pos, len(neg_pool))
-        neg = set(random.sample(neg_pool, n_neg)) if n_neg > 0 else set()
+        if args.neg_per_pos < 0:
+            neg = set(neg_pool)
+        elif len(pos_expanded) == 0 and args.neg_per_pos >= 0:
+            n_neg = min(64, len(neg_pool))
+            neg = set(random.sample(neg_pool, n_neg))
+        else:
+            n_neg = min(len(pos_expanded) * args.neg_per_pos, len(neg_pool))
+            neg = set(random.sample(neg_pool, n_neg)) if n_neg > 0 else set()
 
         for z in sorted(pos_expanded):
             rows.append((series_id, z, 1))
