@@ -17,11 +17,13 @@ def _process_one_json(json_path: Path) -> Optional[list[dict[str, Any]]]:
     """Reads one .json and returns a list of slice-level entries.
     Returns None if the .json or .npz is missing or invalid."""
     try:
+        json_path = Path(json_path)
+
         with open(json_path, "r") as f:
             meta = json.load(f)
 
         series_id = meta.get("series_id")
-        npz_path = series_id.with_suffix(".npz")
+        npz_path = json_path.with_suffix(".npz")
 
         if not npz_path.exists():
             logging.warning(f"Missing .npz file for {json_path.name}")
@@ -49,7 +51,7 @@ def _process_one_json(json_path: Path) -> Optional[list[dict[str, Any]]]:
             slice_entries.append(
                 {
                     "series_id": series_id,
-                    "npz_path": npz_path,
+                    "npz_path": str(npz_path),
                     "slice_idx": slice_idx,
                     "patient_label": patient_label,
                     "slice_has_aneurysm": has_aneurysm,
