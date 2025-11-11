@@ -40,7 +40,7 @@ def _process_one_json(json_path: Path) -> Optional[list[dict[str, Any]]]:
         if patient_label == 1:
             try:
                 with np.load(npz_path, mmap_mode="r") as data:
-                    slice_sums = data["mask"].sum(axis=(1, 2))
+                    slice_sums = data["cow_mask"].sum(axis=(1, 2))
                     positive_slice_indices = set(np.where(slice_sums > 0)[0])
             except Exception as e:
                 logging.warning(f"Could not load mask for {series_id}: {e}")
