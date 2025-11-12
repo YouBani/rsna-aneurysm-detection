@@ -166,7 +166,7 @@ def _process_one(
         if z_pos is not None:
             save_dict["z_pos"] = np.asarray(z_pos, dtype=np.float32)
 
-        np.savez_compressed(out_npz, **save_dict)
+        np.savez(out_npz, **save_dict)
 
         series_info = {
             "series_id": series_id,
