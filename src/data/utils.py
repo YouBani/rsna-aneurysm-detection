@@ -272,21 +272,32 @@ def _bbox_from_mask(
     return y0, y1, x0, x1
 
 
-def _check_if_axial(headers: list[Dataset], iop_tolerance: float = 0.15) -> None:
+def _check_if_axial(headers: list[Dataset], z_normal_tolerance: float = 0.9) -> None:
     """Checks if a scan is Axial."""
     if not headers:
         raise ValueError("No DICOM headers found to check orientation.")
 
-    ideal_iop = np.array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
-
-    iop_val = getattr(headers[0], "ImageOrientationPatient", None)
-    if iop_val is None:
+    iop_raw = getattr(headers[0], "ImageOrientationPatient", None)
+    if iop_raw is None:
         raise ValueError("Could not read ImageOrientationPatient: tag missing")
 
-    iop = np.array(iop_val, dtype=float)
+    iop = np.asarray(iop_raw, dtype=float)
+    if iop.shape != (6,):
+        raise ValueError(f"ImageOrientationPatient has unexpected shape: {iop.shape}")
 
-    if not np.allclose(iop, ideal_iop, atol=iop_tolerance):
-        raise ValueError(f"Scan is not axial (IOP: {iop}). Skipping.")
+    row, col = iop[:3], iop[3:]
+    n = np.cross(row, col)
+
+    norm = np.linalg.norm(n)
+    if norm < 1e-6:
+        raise ValueError("Invalid orientation: slice normal has near-zero norm")
+    n = n / norm
+
+    abs_z_component = abs(n[2])
+    if abs_z_component < z_normal_tolerance:
+        raise ValueError(
+            f"Scan is not Axial: IOP: {iop_raw} (Z-normal: {abs_z_component:.4f} < {z_normal_tolerance}). Skipping."
+        )
 
 
 def crop_and_normalize_ct(
