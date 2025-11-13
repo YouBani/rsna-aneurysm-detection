@@ -96,7 +96,7 @@ def main():
                 )
             )
 
-        for z in sorted(pos_expanded_idx):
+        for z in sorted(neg_sampled_idx):
             entry = slice_map[z]
             final_rows_to_write.append(
                 (
@@ -109,6 +109,7 @@ def main():
             )
 
     args.out_csv.parent.mkdir(parents=True, exist_ok=True)
+
     logging.info(f"Writing {len(final_rows_to_write)} sampled slices to {args.out_csv}")
 
     with args.out_csv.open("w", newline="") as f:
