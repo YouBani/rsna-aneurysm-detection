@@ -55,6 +55,7 @@ def _load_series_pixels(files: list[Path]) -> tuple[np.ndarray, list[Dataset]]:
     headers = [
         dcmread(str(fp), stop_before_pixels=True, defer_size="1 MB") for fp in files
     ]
+    _check_if_axial(headers)
     headers = _sort_headers_by_z(headers)
 
     vol = []
@@ -270,6 +271,21 @@ def _bbox_from_mask(
     x0 = max(int(xs[0] - pad), 0)
     x1 = min(int(xs[-1] + 1 + pad), w)
     return y0, y1, x0, x1
+
+
+def _check_if_axial(headers: list[Dataset], iop_tolerance: float = 0.05) -> bool:
+    """Checks if a scan is Axial."""
+    if not headers:
+        raise ValueError("No DICOM headers found to check orientation.")
+
+    ideal_iop = np.array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+
+    try:
+        iop = np.array(headers[0].ImageOrientationPatient, dtype=float)
+        if not np.allclose(iop, ideal_iop, atol=iop_tolerance):
+            raise ValueError("Scan is not axial. Skipping.")
+    except Exception as e:
+        raise ValueError(f"Could not read ImageOrientationPatient: {e}")
 
 
 def crop_and_normalize_ct(
