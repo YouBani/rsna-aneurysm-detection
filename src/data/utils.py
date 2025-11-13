@@ -133,9 +133,9 @@ def _z_from_classic(headers: list[Dataset]) -> Optional[np.ndarray]:
     Falls back to IPP[2]. Returns None if positions unavailable.
     """
     try:
-        iop = np.asarray(headers[0].ImageOrientationPatient, dtype=np.float32)  # (6,)
+        iop = np.asarray(headers[0].ImageOrientationPatient, dtype=np.float32)
         row, col = iop[:3], iop[3:]
-        n = np.cross(row, col)  # slice normal
+        n = np.cross(row, col)
         zs = []
         for i, ds in enumerate(headers):
             ipp = np.asarray(
@@ -174,7 +174,6 @@ def _anti_alias_if_needed(vol: np.ndarray, target_z: int, enable: bool) -> np.nd
     sigma = 0.5 * min(max(factor - 1.0, 0.0), 2.0)
     if sigma <= 0:
         return vol
-    # Only along Z (axis=0), 'nearest' matches edge behavior of medical stacks.
     return _gauss1d(vol, sigma=sigma, axis=0, mode="nearest")
 
 
@@ -273,19 +272,21 @@ def _bbox_from_mask(
     return y0, y1, x0, x1
 
 
-def _check_if_axial(headers: list[Dataset], iop_tolerance: float = 0.05) -> bool:
+def _check_if_axial(headers: list[Dataset], iop_tolerance: float = 0.15) -> None:
     """Checks if a scan is Axial."""
     if not headers:
         raise ValueError("No DICOM headers found to check orientation.")
 
     ideal_iop = np.array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
 
-    try:
-        iop = np.array(headers[0].ImageOrientationPatient, dtype=float)
-        if not np.allclose(iop, ideal_iop, atol=iop_tolerance):
-            raise ValueError("Scan is not axial. Skipping.")
-    except Exception as e:
-        raise ValueError(f"Could not read ImageOrientationPatient: {e}")
+    iop_val = getattr(headers[0], "ImageOrientationPatient", None)
+    if iop_val is None:
+        raise ValueError("Could not read ImageOrientationPatient: tag missing")
+
+    iop = np.array(iop_val, dtype=float)
+
+    if not np.allclose(iop, ideal_iop, atol=iop_tolerance):
+        raise ValueError(f"Scan is not axial (IOP: {iop}). Skipping.")
 
 
 def crop_and_normalize_ct(
