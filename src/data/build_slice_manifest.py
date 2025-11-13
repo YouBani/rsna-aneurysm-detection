@@ -23,10 +23,12 @@ def _process_one_json(json_path: Path) -> Optional[list[dict[str, Any]]]:
             meta = json.load(f)
 
         series_id = meta.get("series_id")
-        npz_path = json_path.with_suffix(".npz")
+        base_path = json_path.with_name(series_id)
+        vol_npy_path = base_path.with_suffix(".vol.npy")
+        mask_npy_path = base_path.with_suffix(".mask.npy")
 
-        if not npz_path.exists():
-            logging.warning(f"Missing .npz file for {json_path.name}")
+        if not vol_npy_path.exists() or not mask_npy_path.exists():
+            logging.warning(f"Missing .npy files for {series_id}")
             return None
 
         num_slices = meta.get("shape_cropped", [0])[0]
@@ -39,9 +41,9 @@ def _process_one_json(json_path: Path) -> Optional[list[dict[str, Any]]]:
         positive_slice_indices = set()
         if patient_label == 1:
             try:
-                with np.load(npz_path, mmap_mode="r") as data:
-                    slice_sums = data["cow_mask"].sum(axis=(1, 2))
-                    positive_slice_indices = set(np.where(slice_sums > 0)[0])
+                mask_data = np.load(mask_npy_path)
+                slice_sums = mask_data.sum(axis=(1, 2))
+                positive_slice_indices = set(np.where(slice_sums > 0)[0])
             except Exception as e:
                 logging.warning(f"Could not load mask for {series_id}: {e}")
 
@@ -51,7 +53,8 @@ def _process_one_json(json_path: Path) -> Optional[list[dict[str, Any]]]:
             slice_entries.append(
                 {
                     "series_id": series_id,
-                    "npz_path": str(npz_path),
+                    "vol_path": str(vol_npy_path),
+                    "mask_path": str(mask_npy_path),
                     "slice_idx": slice_idx,
                     "patient_label": patient_label,
                     "slice_has_aneurysm": has_aneurysm,
