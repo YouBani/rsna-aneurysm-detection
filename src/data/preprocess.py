@@ -99,33 +99,22 @@ def _process_one(
         original_w = meta.get("w", -1)
 
         mask_aneurysm_cropped = np.zeros_like(vol_cropped, dtype=np.uint8)
-        mask_cow_cropped = np.zeros_like(vol_cropped, dtype=np.uint8)
 
         aneurysm_nii_path_str = row.get("segmentation_path")
 
         if aneurysm_nii_path_str and aneurysm_nii_path_str.lower() != "null":
-            aneurysm_nii_path = Path(aneurysm_nii_path_str)
-
             cow_nii_path_str = aneurysm_nii_path_str.replace(".nii", "_cowseg.nii")
             cow_nii_path = Path(cow_nii_path_str)
 
-            if aneurysm_nii_path.exists():
-                mask_raw = nib.load(aneurysm_nii_path).get_fdata(dtype=np.float32)
+            if cow_nii_path.exists():
+                mask_raw = nib.load(cow_nii_path).get_fdata(dtype=np.float32)
                 mask_aligned = _align_mask(mask_raw, modality)
                 mask_aneurysm_cropped = mask_aligned[:, y0:y1, x0:x1].astype(np.uint8)
                 if mask_aneurysm_cropped.shape != vol_cropped.shape:
                     return series_id, f"Aneurysm mask shape mismatch"
 
-            if cow_nii_path.exists():
-                mask_raw = nib.load(cow_nii_path).get_fdata(dtype=np.float32)
-                mask_aligned = _align_mask(mask_raw, modality)
-                mask_cow_cropped = mask_aligned[:, y0:y1, x0:x1].astype(np.uint8)
-                if mask_cow_cropped.shape != vol_cropped.shape:
-                    return series_id, f"CoW mask shape mismatch"
-
         vol_to_save = vol_cropped
         mask_aneurysm_to_save = mask_aneurysm_cropped
-        mask_cow_to_save = mask_cow_cropped
 
         is_ct = modality in {"CT", "CTA"}
         resample_mm = resample_mm_ct if is_ct else resample_mm_mr
@@ -158,7 +147,6 @@ def _process_one(
         save_dict: dict[str, Any] = {
             "vol": vol_to_save.astype(np.float16),
             "mask": mask_aneurysm_to_save,
-            "cow_mask": mask_cow_to_save,
         }
 
         if bbox is not None:
@@ -182,7 +170,6 @@ def _process_one(
             "resampled": bool(target_z is not None),
             "resample_mm": None if resample_mm is None else float(resample_mm),
             "has_aneurysm_mask": bool(mask_aneurysm_to_save.sum() > 0),
-            "has_cow_mask": bool(mask_cow_to_save.sum() > 0),
         }
         out_json.write_text(json.dumps(series_info, indent=2))
 
