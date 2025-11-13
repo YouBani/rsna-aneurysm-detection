@@ -62,7 +62,7 @@ def _process_one(
 ) -> Optional[tuple[str, str]]:
     """
     Worker: load/crop/norm vol -> load/align/crop masks
-            -> (optional) resample -> save .npz + .json.
+            -> (optional) resample -> save .npy + .json.
     Returns None on success or (series_id, error_message) on failure.
     """
     row, out_dir, resample_mm_ct, resample_mm_mr = args
@@ -80,9 +80,11 @@ def _process_one(
     if modality is None:
         return series_id, "row['subtype'] or row['modality'] missing"
 
-    out_npz = Path(out_dir) / f"{series_id}.npz"
     out_json = Path(out_dir) / f"{series_id}.json"
-    if out_npz.exists() and out_json.exists():
+    vol_npy_path = out_dir / f"{series_id}.vol.npy"
+    mask_npy_path = out_dir / f"{series_id}.mask.npy"
+
+    if vol_npy_path.exists() and mask_npy_path.exists() and out_json.exists():
         return None
 
     try:
@@ -144,17 +146,8 @@ def _process_one(
                 else:
                     z_pos = None
 
-        save_dict: dict[str, Any] = {
-            "vol": vol_to_save.astype(np.float16),
-            "mask": mask_aneurysm_to_save,
-        }
-
-        if bbox is not None:
-            save_dict["bbox"] = np.asarray(bbox, dtype=np.int32)
-        if z_pos is not None:
-            save_dict["z_pos"] = np.asarray(z_pos, dtype=np.float32)
-
-        np.savez(out_npz, **save_dict)
+        np.save(vol_npy_path, vol_to_save.astype(np.float16))
+        np.save(mask_npy_path, mask_aneurysm_to_save)
 
         series_info = {
             "series_id": series_id,
@@ -171,6 +164,9 @@ def _process_one(
             "resample_mm": None if resample_mm is None else float(resample_mm),
             "has_aneurysm_mask": bool(mask_aneurysm_to_save.sum() > 0),
         }
+        if z_pos is not None:
+            series_info["z_pos"] = [float(z) for z in z_pos]
+
         out_json.write_text(json.dumps(series_info, indent=2))
 
         return None
