@@ -23,9 +23,9 @@ def _process_one_json(json_path: Path) -> Optional[list[dict[str, Any]]]:
             meta = json.load(f)
 
         series_id = meta.get("series_id")
-        base_path = json_path.with_name(series_id)
-        vol_npy_path = base_path.with_suffix(".vol.npy")
-        mask_npy_path = base_path.with_suffix(".mask.npy")
+        parent_dir = json_path.parent
+        vol_npy_path = parent_dir / f"{series_id}.vol.npy"
+        mask_npy_path = parent_dir / f"{series_id}.mask.npy"
 
         if not vol_npy_path.exists() or not mask_npy_path.exists():
             logging.warning(f"Missing .npy files for {series_id}")
