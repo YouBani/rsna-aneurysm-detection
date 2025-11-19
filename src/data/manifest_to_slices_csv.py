@@ -59,18 +59,20 @@ def main():
     final_rows_to_write = []
 
     for series_id, series_slices in by_series.items():
-        series_slices.sort(key=lambda x: x[0])
-        num_slices = series_slices[-1][0] + 1
-        pos = {z for z, has in series_slices if has}
+        series_slices.sort(key=lambda x: x["slice_idx"])
+        num_slices = series_slices[-1]["slice_idx"] + 1
+        pos_slices_idx = {
+            s["slice_idx"] for s in series_slices if s["slice_has_aneurysm"]
+        }
         pos_expanded_idx = set()
-        for z in pos:
+        for z in pos_slices_idx:
             for dz in range(-args.pos_pad, args.pos_pad + 1):
                 pos_expanded_idx.add(min(max(z + dz, 0), num_slices - 1))
 
         all_slice_idx = set(range(num_slices))
         neg_pool_idx = sorted(all_slice_idx - pos_expanded_idx)
-        neg_sampled_idx = set()
 
+        neg_sampled_idx = set()
         if args.neg_per_pos < 0:
             neg_sampled_idx = set(neg_pool_idx)
         elif len(pos_expanded_idx) == 0 and args.neg_per_pos >= 0:
