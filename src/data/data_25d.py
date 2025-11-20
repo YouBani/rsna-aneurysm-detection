@@ -9,7 +9,7 @@ from .rsna_slice_dataset import RSNASliceDataset, get_transform
 __all__ = ["build_loaders"]
 
 
-def _seed_worker(_workder_id):
+def _seed_worker(_worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
@@ -24,7 +24,7 @@ def build_loaders(
     num_workers: int = 4,
     seed: int = 42,
     pin_memory: bool = True,
-) -> tuple[Dataloader, Dataloader]:
+) -> tuple[DataLoader, DataLoader]:
     """Build train/val DataLoaders for the 2.5D slice model."""
     train_transform = get_transform(image_size=image_size, is_train=True)
     val_transform = get_transform(image_size=image_size, is_train=False)
